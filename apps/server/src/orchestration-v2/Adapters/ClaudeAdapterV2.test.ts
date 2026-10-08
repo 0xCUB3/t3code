@@ -1136,6 +1136,7 @@ describe("ClaudeAdapterV2 worktree location follow", () => {
           attachmentsDir,
           fileSystem,
           path: yield* Path.Path,
+          crypto: yield* Crypto.Crypto,
           idAllocator,
           queryRunner: {
             allocateSessionId: Effect.succeed("native-thread-claude-worktree-follow"),
