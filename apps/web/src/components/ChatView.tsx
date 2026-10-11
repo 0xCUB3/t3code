@@ -11707,7 +11707,7 @@ export default function ChatView(props: ChatViewProps) {
                     />
                   ) : null
                 }
-                bannerItems={composerBannerItems}
+                bannerItems={sideAwareBannerItems}
                 resumeCompactionTokens={resumeCompactionTokens}
                 keepFullHistory={keepFullHistory}
                 onToggleKeepFullHistory={toggleKeepFullHistory}
