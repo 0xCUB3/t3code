@@ -318,6 +318,7 @@ import {
   ChevronDownIcon,
   DownloadIcon,
   GitBranchIcon,
+  MessageCircleQuestionIcon,
   TargetIcon,
   WifiOffIcon,
 } from "lucide-react";
@@ -465,11 +466,7 @@ import {
   resolveScrollToEndClearance,
 } from "./composerFooterLayout";
 import { ChatHeader } from "./chat/ChatHeader";
-import {
-  MainThreadWaitingBar,
-  SideChatReplyBar,
-  SideComposerLabel,
-} from "./chat/SideChatComposerBars";
+import { SideChatReplyBar } from "./chat/SideChatReplyBar";
 import { SideChatHeader } from "./chat/SideChatHeader";
 import { useAsideTitles } from "../hooks/useAsideTitles";
 import { useSideChatActions } from "../hooks/useSideChatActions";
@@ -8060,6 +8057,47 @@ export default function ChatView(props: ChatViewProps) {
     systemComposerBannerItems,
     usageLimitsBanner,
   ]);
+  // While a side chat has the thread's composer, it says so above the
+  // composer, and the parent's own questions stay one Escape away.
+  const sideChatParentShell = useThreadShell(embedded ? (sideChatParentRef ?? null) : null);
+  const parentAwaitingAnswer =
+    sideChatParentShell?.hasPendingApprovals === true ||
+    sideChatParentShell?.hasPendingUserInput === true;
+  const sideAwareBannerItems = useMemo<ComposerBannerStackItem[]>(() => {
+    if (!embedded) return composerBannerItems;
+    const sideItems: ComposerBannerStackItem[] = [];
+    if (parentAwaitingAnswer) {
+      sideItems.push({
+        id: "side-chat:parent-waiting",
+        variant: "warning",
+        priority: "activity",
+        icon: <MessageCircleQuestionIcon />,
+        title: "The main thread is waiting on you",
+        actions: (
+          <Button size="xs" variant="ghost" onClick={releaseSideComposer}>
+            Answer it
+          </Button>
+        ),
+      });
+    }
+    sideItems.push({
+      id: "side-chat",
+      variant: "info",
+      priority: "activity",
+      icon: <MessageCircleQuestionIcon />,
+      title: (
+        <span className="flex min-w-0 items-baseline gap-1.5">
+          <span className="shrink-0 font-medium text-foreground">Side chat</span>
+          <span className="min-w-0 truncate font-normal text-muted-foreground">
+            Esc goes back to main
+          </span>
+        </span>
+      ),
+      dismissLabel: "Back to main",
+      onDismiss: releaseSideComposer,
+    });
+    return [...sideItems, ...composerBannerItems];
+  }, [composerBannerItems, embedded, parentAwaitingAnswer, releaseSideComposer]);
 
   useEffect(() => {
     setPendingServerThreadEnvMode(null);
@@ -11648,7 +11686,7 @@ export default function ChatView(props: ChatViewProps) {
                     />
                   ) : null
                 }
-                bannerItems={composerBannerItems}
+                bannerItems={sideAwareBannerItems}
                 resumeCompactionTokens={resumeCompactionTokens}
                 keepFullHistory={keepFullHistory}
                 onToggleKeepFullHistory={toggleKeepFullHistory}
@@ -11808,12 +11846,7 @@ export default function ChatView(props: ChatViewProps) {
       />
     </div>
   );
-  const sideComposerFrame = (
-    <div data-chat-embedded={threadId} className="relative">
-      <SideComposerLabel onBack={releaseSideComposer} />
-      {composerAnchor}
-    </div>
-  );
+  const sideComposerFrame = <div data-chat-embedded={threadId}>{composerAnchor}</div>;
 
   const content = (
     <div
@@ -12142,13 +12175,7 @@ export default function ChatView(props: ChatViewProps) {
                   ) : (
                     <>
                       <div hidden={focusedSideChatId !== null}>{composerAnchor}</div>
-                      <div className="relative">
-                        {focusedSideChatId !== null &&
-                        (pendingApprovals.length > 0 || pendingUserInputs.length > 0) ? (
-                          <MainThreadWaitingBar />
-                        ) : null}
-                        <div ref={setSideComposerSlotElement} />
-                      </div>
+                      <div ref={setSideComposerSlotElement} />
                     </>
                   )}
                 </div>
