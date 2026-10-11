@@ -8637,7 +8637,10 @@ export default function ChatView(props: ChatViewProps) {
     if (embedded) return;
     const handler = (event: ClipboardEvent) => {
       if (!activeThreadId || isCommandPaletteOpen()) return;
-      if (event.target instanceof Element && event.target.closest("[data-chat-embedded]")) return;
+      // A paste inside a side chat goes to its composer only while it has the
+      // thread's composer; otherwise it isn't this thread's to take.
+      const targetChat = chatViewOf(event.target);
+      if (targetChat !== null && targetChat !== focusedSideChatId) return;
       if (getTerminalFocusOwner() !== null) return;
       const pasteComposer =
         focusedSideChatId !== null && activeThreadKey !== null
