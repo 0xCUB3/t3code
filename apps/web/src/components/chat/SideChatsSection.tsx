@@ -201,7 +201,11 @@ export function SideChatsSection(props: { environmentId: EnvironmentId; threadId
             Previous{!previousExpanded && ` (${previous.length})`}
           </CollapsibleSectionHeader>
           {previousExpanded ? (
-            <ul aria-label="Previous side chats" className="m-0 list-none p-0">
+            <ul
+              aria-label="Previous side chats"
+              className="m-0 list-none p-0"
+              data-thread-details-unmeasured
+            >
               {previous.map(renderRow)}
             </ul>
           ) : null}

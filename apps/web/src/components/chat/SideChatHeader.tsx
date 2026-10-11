@@ -8,6 +8,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { ArrowUpFromLineIcon, MoreHorizontalIcon, PenLineIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 
+import { useComposerDraftStore } from "../../composerDraftStore";
 import { useSideChatActions } from "../../hooks/useSideChatActions";
 import { useThreadProjection, useThreadShell } from "../../state/entities";
 import { buildThreadRouteParams } from "../../threadRoutes";
@@ -32,9 +33,14 @@ export function SideChatHeader(props: { environmentId: EnvironmentId; threadId: 
   const parentProjection = useThreadProjection(parentRef)?.projection ?? null;
   const actions = useSideChatActions(parentRef);
   const [busy, setBusy] = useState(false);
+  // The composer's own permission pick is what the next send uses, so the
+  // switch reflects it before falling back to the thread's mode.
+  const composerRuntimeMode = useComposerDraftStore(
+    (store) => store.getComposerDraft(childRef)?.runtimeMode ?? null,
+  );
 
   if (shell === null) return null;
-  const allowEdits = shell.runtimeMode !== "approval-required";
+  const allowEdits = (composerRuntimeMode ?? shell.runtimeMode) !== "approval-required";
   const mergeRun = childProjection === null ? null : resolveLatestMergeBackRun(childProjection);
   const canBringBack = shell.lineage.relationshipToParent === "fork" && mergeRun !== null;
   const bringBackReason =

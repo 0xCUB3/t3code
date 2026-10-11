@@ -85,7 +85,10 @@ export interface ThreadCommandInput extends CommandMetadata {
   readonly threadId: ThreadId;
 }
 
-export type DeleteThreadInput = ThreadCommandInput;
+export interface DeleteThreadInput extends ThreadCommandInput {
+  /** Delete only while the thread has no message or run yet. */
+  readonly expectedEmpty?: boolean;
+}
 export type ArchiveThreadInput = ThreadCommandInput;
 export type UnarchiveThreadInput = ThreadCommandInput;
 export type SettleThreadInput = ThreadCommandInput;
@@ -441,7 +444,14 @@ function simpleThreadCommand(
 export const deleteThread = Effect.fn("EnvironmentCommands.deleteThread")(function* (
   input: DeleteThreadInput,
 ) {
-  return yield* simpleThreadCommand("thread.delete", input);
+  if (input.expectedEmpty !== true) return yield* simpleThreadCommand("thread.delete", input);
+  const commandId = yield* allocateCommandId(input);
+  return yield* dispatch({
+    type: "thread.delete",
+    commandId,
+    threadId: input.threadId,
+    expectedEmpty: true,
+  });
 });
 
 export const archiveThread = Effect.fn("EnvironmentCommands.archiveThread")(function* (

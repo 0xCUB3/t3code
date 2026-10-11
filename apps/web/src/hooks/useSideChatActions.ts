@@ -5,7 +5,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import { resolveSideChatHistoryAvailability } from "@t3tools/client-runtime/state/thread-workflows";
 import type { RunId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 
 import { useComposerDraftStore } from "../composerDraftStore";
 import { newMessageId, newThreadId } from "../lib/utils";
@@ -187,8 +187,13 @@ export function useSideChatActions(parentRef: ScopedThreadRef | null) {
     [createThread, forkFromRun, startTurn],
   );
 
+  // Read at call time: depending on the projection would replace `start` (and
+  // the timeline callbacks built on it) on every streamed update.
+  const projectionRef = useRef(projection);
+  projectionRef.current = projection;
   const start = useCallback(
     async (input: StartSideChatInput): Promise<ScopedThreadRef | null> => {
+      const projection = projectionRef.current;
       if (parentRef === null || projection === null || !supported) return null;
       const parentKey = scopedThreadKey(parentRef);
       // A second press while the first fork is in flight would create a second side chat.
@@ -200,7 +205,7 @@ export function useSideChatActions(parentRef: ScopedThreadRef | null) {
         startingSideChatFor.delete(parentKey);
       }
     },
-    [parentRef, projection, startSideChat, supported],
+    [parentRef, startSideChat, supported],
   );
 
   const reopenLatest = useCallback((): boolean => {
@@ -241,9 +246,17 @@ export function useSideChatActions(parentRef: ScopedThreadRef | null) {
           runtimeMode: allow ? SIDE_CHAT_EDITABLE_RUNTIME_MODE : SIDE_CHAT_READ_ONLY_RUNTIME_MODE,
         },
       });
-      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-        reportFailure("Could not change edit access", squashAtomCommandFailure(result));
+      if (result._tag === "Failure") {
+        if (!isAtomCommandInterrupted(result)) {
+          reportFailure("Could not change edit access", squashAtomCommandFailure(result));
+        }
+        return;
       }
+      // The composer's own permission pick outranks the thread's mode on the
+      // next send, so drop it and let the switch decide.
+      useComposerDraftStore
+        .getState()
+        .setRuntimeMode(scopeThreadRef(parentRef.environmentId, childThreadId), null);
     },
     [parentRef, setRuntimeMode],
   );
@@ -266,14 +279,17 @@ export function useSideChatActions(parentRef: ScopedThreadRef | null) {
   /** Closing a side chat that never got a message throws it away; otherwise it stays listed. */
   const close = useCallback(
     async (childThreadId: ThreadId) => {
-      const shell = readSideChats().find((thread) => thread.id === childThreadId);
-      if (shell !== undefined && isEmptySideChat(shell)) {
-        await discard(childThreadId);
-        return;
-      }
       closeSurface(childThreadId);
+      const shell = readSideChats().find((thread) => thread.id === childThreadId);
+      if (parentRef === null || shell === undefined || !isEmptySideChat(shell)) return;
+      // This client's copy can lag a question that already landed, so the
+      // server deletes only if the thread is still empty. If not, it stays listed.
+      await deleteThread({
+        environmentId: parentRef.environmentId,
+        input: { threadId: childThreadId, expectedEmpty: true },
+      });
     },
-    [closeSurface, discard, readSideChats],
+    [closeSurface, deleteThread, parentRef, readSideChats],
   );
 
   /** Clears the flag, so the thread joins the sidebar as an ordinary one. */

@@ -2754,6 +2754,8 @@ export const OrchestrationV2Command = Schema.Union([
     type: Schema.Literal("thread.delete"),
     commandId: CommandId,
     threadId: ThreadId,
+    /** Delete only while no message or run has landed on the thread. */
+    expectedEmpty: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({
     type: Schema.Literal("thread.settle"),

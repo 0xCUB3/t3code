@@ -7,6 +7,7 @@ import {
   migratePersistedRightPanelState,
   pullRequestSurface,
   pullRequestSurfaceId,
+  registerEmbeddedPanelHost,
   selectActiveRightPanel,
   selectActiveRightPanelSurface,
   selectSelectedRightPanelSurface,
@@ -125,6 +126,22 @@ describe("rightPanelStore", () => {
       { kind: "panel-tab", threadRef: refA, surface: { id: "file:src/app.ts" } },
     ]);
     expect(useClosedViewStore.getState().entries).toHaveLength(1);
+  });
+
+  it("opens a mounted side chat's files in its parent's panel, and its own once unmounted", () => {
+    const store = useRightPanelStore.getState();
+    const unregister = registerEmbeddedPanelHost(refB, refA);
+    store.openFile(refB, "src/app.ts");
+    const surfaceIds = (ref: typeof refA) =>
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, ref).surfaces.map(
+        (surface) => surface.id,
+      );
+    expect(surfaceIds(refA)).toEqual(["file:src/app.ts"]);
+    expect(surfaceIds(refB)).toEqual([]);
+
+    unregister();
+    store.openFile(refB, "src/other.ts");
+    expect(surfaceIds(refB)).toEqual(["file:src/other.ts"]);
   });
 
   it("keeps several side chats open as peer tabs and reloads only well-formed ones", () => {

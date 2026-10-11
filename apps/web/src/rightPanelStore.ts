@@ -266,6 +266,26 @@ const terminalSurface = (terminalId: string): RightPanelSurface => ({
   activeTerminalId: terminalId,
 });
 
+// A side chat shown inside its parent's panel has no panel of its own, so files
+// and attachments it opens go to the parent while it is mounted there. Opened as
+// a full thread, it owns its panel again.
+const embeddedPanelHosts = new Map<string, ScopedThreadRef>();
+
+export function registerEmbeddedPanelHost(
+  childRef: ScopedThreadRef,
+  hostRef: ScopedThreadRef,
+): () => void {
+  const key = scopedThreadKey(childRef);
+  embeddedPanelHosts.set(key, hostRef);
+  return () => {
+    if (embeddedPanelHosts.get(key) === hostRef) embeddedPanelHosts.delete(key);
+  };
+}
+
+function panelOwnerOf(ref: ScopedThreadRef): ScopedThreadRef {
+  return embeddedPanelHosts.get(scopedThreadKey(ref)) ?? ref;
+}
+
 const asideSurface = (threadId: string): RightPanelSurface => ({
   id: `aside:${threadId}`,
   kind: "aside",
@@ -723,7 +743,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
         ),
       openFile: (ref, requestedPath, line) =>
         set((state) =>
-          userAction(state, scopedThreadKey(ref), (current) => {
+          userAction(state, scopedThreadKey(panelOwnerOf(ref)), (current) => {
             if (requestedPath === ".") {
               return upsertSurface(current, singletonSurface("files"));
             }
@@ -758,7 +778,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
         ),
       openAttachment: (ref, attachment) =>
         set((state) =>
-          userAction(state, scopedThreadKey(ref), (current) => {
+          userAction(state, scopedThreadKey(panelOwnerOf(ref)), (current) => {
             const withoutStandaloneExplorer = current.surfaces.filter(
               (surface) => surface.kind !== "files",
             );

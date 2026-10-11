@@ -10698,6 +10698,20 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
             ),
           );
+        // Decided under the thread's command lock, so a message that already
+        // landed always wins over "discard if empty".
+        if (command.expectedEmpty === true) {
+          const messageCount = yield* projectionStore
+            .getMessageCount(command.threadId)
+            .pipe(mapDispatchError(command));
+          if (messageCount > 0 || projection.runs.length > 0) {
+            return yield* new OrchestratorDispatchError({
+              commandId: command.commandId,
+              commandType: command.type,
+              cause: `Thread ${command.threadId} is no longer empty.`,
+            });
+          }
+        }
         return yield* mapDispatchError(command)(
           planThreadDeletion({
             command,

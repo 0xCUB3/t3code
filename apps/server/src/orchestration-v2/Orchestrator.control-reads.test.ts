@@ -707,6 +707,15 @@ it.effect("links a side chat under its parent without claiming a fork, and promo
     );
     // An unknown parent is a rejected command, not a projection failure.
     assert.equal(missingParent._tag, "OrchestratorDispatchError");
+
+    // "Discard if empty" deletes an empty side chat.
+    yield* orchestrator.dispatch({
+      type: "thread.delete",
+      commandId: CommandId.make("discard-empty-side-chat"),
+      threadId: sideChatId,
+      expectedEmpty: true,
+    });
+    assert.isNotNull((yield* projections.getThread(sideChatId)).deletedAt);
   }).pipe(Effect.provide(layerTest)),
 );
 
@@ -798,5 +807,17 @@ it.effect("forks a side chat from the last finished run while the source is mid-
       }),
     );
     assert.equal(midRun._tag, "Failure");
+
+    // "Discard if empty" never deletes a thread that already has runs.
+    const notEmpty = yield* Effect.flip(
+      orchestrator.dispatch({
+        type: "thread.delete",
+        commandId: CommandId.make("discard-non-empty-thread"),
+        threadId: sourceId,
+        expectedEmpty: true,
+      }),
+    );
+    assert.equal(notEmpty._tag, "OrchestratorDispatchError");
+    assert.isNull((yield* projections.getThread(sourceId)).deletedAt);
   }).pipe(Effect.provide(layerTest)),
 );
