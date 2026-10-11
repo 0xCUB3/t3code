@@ -2319,12 +2319,6 @@ export default function ChatView(props: ChatViewProps) {
   const [sideComposerSlotElement, setSideComposerSlotElement] = useState<HTMLDivElement | null>(
     null,
   );
-  useEffect(() => {
-    if (embedded || activeThreadKey === null || sideComposerSlotElement === null) return;
-    const { setSlot } = useSideChatFocusStore.getState();
-    setSlot(activeThreadKey, sideComposerSlotElement);
-    return () => setSlot(activeThreadKey, null);
-  }, [activeThreadKey, embedded, sideComposerSlotElement]);
   // Back from a side chat, this thread's composer takes the keyboard again.
   const hadFocusedSideChat = useRef(false);
   useEffect(() => {
@@ -2516,6 +2510,21 @@ export default function ChatView(props: ChatViewProps) {
   );
   const canMaximizeRightPanel = rightPanelOpen && !shouldUsePlanSidebarSheet;
   const rightPanelMaximized = canMaximizeRightPanel && rightPanelState.maximized === true;
+  // A maximized panel collapses this column, so a focused side chat keeps its
+  // composer in the panel instead of borrowing this slot.
+  useEffect(() => {
+    if (
+      embedded ||
+      activeThreadKey === null ||
+      sideComposerSlotElement === null ||
+      rightPanelMaximized
+    ) {
+      return;
+    }
+    const { setSlot } = useSideChatFocusStore.getState();
+    setSlot(activeThreadKey, sideComposerSlotElement);
+    return () => setSlot(activeThreadKey, null);
+  }, [activeThreadKey, embedded, rightPanelMaximized, sideComposerSlotElement]);
   const inlineRightPanelOwnsTitleBar = rightPanelOpen && !shouldUsePlanSidebarSheet;
   const [threadPanelPresentation, setThreadPanelPresentation] =
     useState<ThreadPanelPresentation>("inline");
@@ -11634,6 +11643,15 @@ export default function ChatView(props: ChatViewProps) {
                 isServerThread={isServerThread}
                 isLocalDraftThread={isLocalDraftThread}
                 forceExpandedOnMobile={forceExpandedMobileComposer && isDraftHeroState}
+                {...(embedded
+                  ? {
+                      idlePlaceholder: "Ask on the side. Esc goes back to main",
+                      onEscape: () => {
+                        releaseSideComposer();
+                        return true;
+                      },
+                    }
+                  : {})}
                 projectSelectionRequired={isLocalDraftThread && activeProject === null}
                 phase={phase}
                 canInterrupt={canInterruptRunningThread}
@@ -11686,12 +11704,13 @@ export default function ChatView(props: ChatViewProps) {
                     />
                   ) : null
                 }
-                bannerItems={sideAwareBannerItems}
+                bannerItems={composerBannerItems}
                 resumeCompactionTokens={resumeCompactionTokens}
                 keepFullHistory={keepFullHistory}
                 onToggleKeepFullHistory={toggleKeepFullHistory}
                 // With attachments or contexts aboard the pick just inserts the
                 // text, so it sends as a prompt like the typed path would.
+                onSideChatCommand={sideChatsAvailable ? runSideChatCommand : undefined}
                 onUsageLimitsCommand={
                   usageLimitsOffered && usageLimitsKey !== null && !composerHasNonPromptContent
                     ? openUsageLimits
@@ -12164,8 +12183,12 @@ export default function ChatView(props: ChatViewProps) {
                     </div>
                   ) : null}
                   {embedded ? (
-                    sideComposerFocused && sideComposerSlot !== null ? (
-                      createPortal(sideComposerFrame, sideComposerSlot)
+                    sideComposerFocused ? (
+                      sideComposerSlot !== null ? (
+                        createPortal(sideComposerFrame, sideComposerSlot)
+                      ) : (
+                        composerAnchor
+                      )
                     ) : (
                       <SideChatReplyBar
                         needsAnswer={pendingApprovals.length > 0 || pendingUserInputs.length > 0}
