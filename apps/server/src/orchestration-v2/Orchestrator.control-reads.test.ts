@@ -693,6 +693,20 @@ it.effect("links a side chat under its parent without claiming a fork, and promo
       }),
     );
     assert.equal(crossProject._tag, "Failure");
+
+    const missingParent = yield* Effect.flip(
+      orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("create-side-chat-missing-parent"),
+        threadId: ThreadId.make("thread:side-chat-orphan"),
+        title: "Orphan",
+        parentThreadId: ThreadId.make("thread:side-chat-no-such-parent"),
+        sideChat: true,
+        ...base,
+      }),
+    );
+    // An unknown parent is a rejected command, not a projection failure.
+    assert.equal(missingParent._tag, "OrchestratorDispatchError");
   }).pipe(Effect.provide(layerTest)),
 );
 

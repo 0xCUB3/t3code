@@ -1176,7 +1176,9 @@ function OpenCommandPaletteDialog(props: {
             clientSettings.sidebarThreadSortOrder,
           )[0] ?? null)
         : getLatestThreadForProject(
-            threads.filter((thread) => thread.environmentId === project.environmentId),
+            threads.filter(
+              (thread) => thread.environmentId === project.environmentId && !thread.sideChat,
+            ),
             project.id,
             clientSettings.sidebarThreadSortOrder,
           );
@@ -2364,7 +2366,9 @@ function OpenCommandPaletteDialog(props: {
       );
       if (existing) {
         const latestThread = getLatestThreadForProject(
-          threads.filter((thread) => thread.environmentId === existing.environmentId),
+          threads.filter(
+            (thread) => thread.environmentId === existing.environmentId && !thread.sideChat,
+          ),
           existing.id,
           clientSettings.sidebarThreadSortOrder,
         );

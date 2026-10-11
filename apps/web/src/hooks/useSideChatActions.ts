@@ -1,4 +1,4 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -37,6 +37,10 @@ export interface StartSideChatInput {
   /** Fork at this run instead of the latest stable one. */
   readonly runId?: RunId;
 }
+
+// Parent threads with a side chat being created. Module-level so every caller
+// (keybinding, palette, selection Ask, `/side`) shares one guard per parent.
+const startingSideChatFor = new Set<string>();
 
 function reportFailure(title: string, error: unknown) {
   toastManager.add(
@@ -98,19 +102,21 @@ export function useSideChatActions(parentRef: ScopedThreadRef | null) {
     [parentRef],
   );
 
-  const start = useCallback(
-    async (input: StartSideChatInput): Promise<ScopedThreadRef | null> => {
-      if (parentRef === null || projection === null || !supported) return null;
-      const parent = projection.thread;
+  const startSideChat = useCallback(
+    async (
+      ownerRef: ScopedThreadRef,
+      parent: NonNullable<typeof projection>["thread"],
+      input: StartSideChatInput,
+    ): Promise<ScopedThreadRef | null> => {
       const childThreadId = newThreadId();
-      const childRef = scopeThreadRef(parentRef.environmentId, childThreadId);
+      const childRef = scopeThreadRef(ownerRef.environmentId, childThreadId);
       const title = "Side chat";
       const created =
         input.history === "with"
           ? await forkFromRun({
-              environmentId: parentRef.environmentId,
+              environmentId: ownerRef.environmentId,
               input: {
-                sourceThreadId: parentRef.threadId,
+                sourceThreadId: ownerRef.threadId,
                 targetThreadId: childThreadId,
                 ...(input.runId === undefined ? {} : { runId: input.runId }),
                 title,
@@ -119,7 +125,7 @@ export function useSideChatActions(parentRef: ScopedThreadRef | null) {
               },
             })
           : await createThread({
-              environmentId: parentRef.environmentId,
+              environmentId: ownerRef.environmentId,
               input: {
                 threadId: childThreadId,
                 projectId: parent.projectId,
@@ -129,7 +135,7 @@ export function useSideChatActions(parentRef: ScopedThreadRef | null) {
                 interactionMode: "default",
                 branch: parent.branch,
                 worktreePath: parent.worktreePath,
-                parentThreadId: parentRef.threadId,
+                parentThreadId: ownerRef.threadId,
                 sideChat: true,
               },
             });
@@ -146,12 +152,12 @@ export function useSideChatActions(parentRef: ScopedThreadRef | null) {
         );
         return null;
       }
-      useRightPanelStore.getState().openAside(parentRef, childThreadId);
+      useRightPanelStore.getState().openAside(ownerRef, childThreadId);
       const question = input.question?.trim() ?? "";
       const quote = input.quote === undefined ? "" : quoteForSideChat(input.quote);
       if (question.length > 0) {
         const sent = await startTurn({
-          environmentId: parentRef.environmentId,
+          environmentId: ownerRef.environmentId,
           input: {
             threadId: childThreadId,
             message: {
@@ -178,7 +184,23 @@ export function useSideChatActions(parentRef: ScopedThreadRef | null) {
       }
       return childRef;
     },
-    [createThread, forkFromRun, parentRef, projection, startTurn, supported],
+    [createThread, forkFromRun, startTurn],
+  );
+
+  const start = useCallback(
+    async (input: StartSideChatInput): Promise<ScopedThreadRef | null> => {
+      if (parentRef === null || projection === null || !supported) return null;
+      const parentKey = scopedThreadKey(parentRef);
+      // A second press while the first fork is in flight would create a second side chat.
+      if (startingSideChatFor.has(parentKey)) return null;
+      startingSideChatFor.add(parentKey);
+      try {
+        return await startSideChat(parentRef, projection.thread, input);
+      } finally {
+        startingSideChatFor.delete(parentKey);
+      }
+    },
+    [parentRef, projection, startSideChat, supported],
   );
 
   const reopenLatest = useCallback((): boolean => {

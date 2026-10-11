@@ -2236,14 +2236,17 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const parentThread =
       command.parentThreadId === undefined
         ? null
-        : yield* projectionStore
-            .getThread(command.parentThreadId)
-            .pipe(
-              Effect.mapError(
-                (cause) =>
-                  new OrchestratorProjectionError({ threadId: command.parentThreadId!, cause }),
-              ),
-            );
+        : yield* projectionStore.getThread(command.parentThreadId).pipe(
+            Effect.mapError((cause) =>
+              cause._tag === "ProjectionStoreThreadNotFoundError"
+                ? new OrchestratorDispatchError({
+                    commandId: command.commandId,
+                    commandType: command.type,
+                    cause: `Parent thread ${command.parentThreadId} does not exist.`,
+                  })
+                : new OrchestratorProjectionError({ threadId: command.parentThreadId!, cause }),
+            ),
+          );
     if (
       parentThread !== null &&
       (parentThread.deletedAt !== null || parentThread.projectId !== command.projectId)
