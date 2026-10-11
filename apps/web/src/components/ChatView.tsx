@@ -8895,7 +8895,17 @@ export default function ChatView(props: ChatViewProps) {
 
     // `/side` and `/btw` typed in full, like `/usage`: a question after it goes
     // straight to a new side chat, the bare command reopens the latest one.
-    if (sideChatsAvailable && !directAnnotation && !composerHasNonPromptContent) {
+    // Answering an agent question or editing a queued message sends it as text.
+    if (
+      sideChatsAvailable &&
+      !directAnnotation &&
+      !composerHasNonPromptContent &&
+      !(
+        activePendingProgress &&
+        composerRef.current?.getSendContext()?.answeringPendingUserInput !== false
+      ) &&
+      editingQueuedRun === null
+    ) {
       const typedPrompt = promptRef.current;
       const sideCommand = parseSideCommand(typedPrompt);
       if (sideCommand !== null) {
