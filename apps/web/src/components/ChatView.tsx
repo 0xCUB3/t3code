@@ -8896,12 +8896,21 @@ export default function ChatView(props: ChatViewProps) {
     // `/side` and `/btw` typed in full, like `/usage`: a question after it goes
     // straight to a new side chat, the bare command reopens the latest one.
     if (sideChatsAvailable && !directAnnotation && !composerHasNonPromptContent) {
-      const sideCommand = parseSideCommand(promptRef.current);
+      const typedPrompt = promptRef.current;
+      const sideCommand = parseSideCommand(typedPrompt);
       if (sideCommand !== null) {
+        const draftTarget = composerDraftTarget;
         promptRef.current = "";
-        setComposerDraftPrompt(composerDraftTarget, "");
+        setComposerDraftPrompt(draftTarget, "");
         composerRef.current?.resetCursorState();
-        void runSideChatCommand(sideCommand.question);
+        void runSideChatCommand(sideCommand.question).then((opened) => {
+          // No side chat was created: give the command back unless the user
+          // has started typing something else.
+          if (opened) return;
+          const draftStore = useComposerDraftStore.getState();
+          if ((draftStore.getComposerDraft(draftTarget)?.prompt ?? "") !== "") return;
+          draftStore.setPrompt(draftTarget, typedPrompt);
+        });
         return;
       }
     }

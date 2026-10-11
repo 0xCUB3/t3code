@@ -166,8 +166,12 @@ export function useSideChatActions(parentRef: ScopedThreadRef | null) {
             dispatchMode: "auto",
           },
         });
-        if (sent._tag === "Failure" && !isAtomCommandInterrupted(sent)) {
-          reportFailure("Could not send the question", squashAtomCommandFailure(sent));
+        if (sent._tag === "Failure") {
+          // Keep the question in the side chat so it can be sent again.
+          useComposerDraftStore.getState().setPrompt(childRef, `${quote}${question}`);
+          if (!isAtomCommandInterrupted(sent)) {
+            reportFailure("Could not send the question", squashAtomCommandFailure(sent));
+          }
         }
       } else if (quote.length > 0) {
         useComposerDraftStore.getState().setPrompt(childRef, quote);
@@ -194,11 +198,13 @@ export function useSideChatActions(parentRef: ScopedThreadRef | null) {
   /**
    * `/side`, its keybinding and the palette entry: a question starts a side
    * chat and sends it, the bare command reopens the latest or starts one.
+   * Resolves false when no side chat could be opened.
    */
   const run = useCallback(
-    async (question: string) => {
-      if (question.length === 0 && reopenLatest()) return;
-      await start({ history: defaultHistory, ...(question ? { question } : {}) });
+    async (question: string): Promise<boolean> => {
+      if (question.length === 0 && reopenLatest()) return true;
+      const childRef = await start({ history: defaultHistory, ...(question ? { question } : {}) });
+      return childRef !== null;
     },
     [defaultHistory, reopenLatest, start],
   );

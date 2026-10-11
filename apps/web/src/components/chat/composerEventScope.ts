@@ -27,14 +27,37 @@ export function useComposerMenuProps() {
   };
 }
 
+const EMBEDDED_CHAT_SELECTOR = "[data-chat-embedded]";
+
+// Composer menus portal to document.body, so they have no chat ancestor. Focus
+// inside one belongs to the chat that last had focus outside a floating layer.
+let lastFocusedChat: Element | null = null;
+if (typeof document !== "undefined") {
+  document.addEventListener(
+    "focusin",
+    (event) => {
+      if (!(event.target instanceof Element) || isInsideComposerFloatingLayer(event.target)) {
+        return;
+      }
+      lastFocusedChat = event.target.closest(EMBEDDED_CHAT_SELECTOR);
+    },
+    true,
+  );
+}
+
+function chatViewOf(target: EventTarget | null): Element | null {
+  if (!(target instanceof Element)) return null;
+  if (isInsideComposerFloatingLayer(target)) return lastFocusedChat;
+  return target.closest(EMBEDDED_CHAT_SELECTOR);
+}
+
 /**
  * Whether `target` belongs to the same chat view as `own`. A side chat renders
  * a second chat view inside the host's, so window-level composer shortcuts
  * check this to act on one composer only.
  */
 export function isInSameChatView(target: EventTarget | null, own: Element | null): boolean {
-  const targetChat = target instanceof Element ? target.closest("[data-chat-embedded]") : null;
-  return targetChat === (own?.closest("[data-chat-embedded]") ?? null);
+  return chatViewOf(target) === (own?.closest(EMBEDDED_CHAT_SELECTOR) ?? null);
 }
 
 export function isInsideComposerFloatingLayer(target: EventTarget | null): boolean {

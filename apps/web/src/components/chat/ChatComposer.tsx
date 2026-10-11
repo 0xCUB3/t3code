@@ -1566,7 +1566,7 @@ export interface ChatComposerProps {
    * Starts (or, with no question, reopens) a side chat. Absent when the thread
    * cannot have one, which also hides `/side` and `/btw` from the slash menu.
    */
-  onSideChatCommand?: ((question: string) => Promise<void>) | undefined;
+  onSideChatCommand?: ((question: string) => Promise<unknown>) | undefined;
   environmentUnavailable: {
     readonly label: string;
     readonly connection: EnvironmentConnectionPresentation;
@@ -2689,6 +2689,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         }),
   );
 
+  const composerHasNonPromptContent = composerDraft
+    ? composerDraftHasUserContent({ ...composerDraft, prompt: "" })
+    : false;
   const composerMenuItems = useMemo<ComposerCommandItem[]>(() => {
     if (!composerTrigger) return [];
     if (composerTrigger.kind === "path") {
@@ -2720,7 +2723,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           label: "/model",
           description: "Switch response model for this thread",
         },
-        ...(props.onSideChatCommand
+        // Match the typed-command path in ChatView: only a leading command on
+        // a prompt-only draft opens a side chat, so offer it only there.
+        ...(props.onSideChatCommand &&
+        composerTrigger.rangeStart === 0 &&
+        !composerHasNonPromptContent
           ? ([
               {
                 id: "slash:side",
@@ -2861,6 +2868,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   }, [
     activeThreadId,
     props.onSideChatCommand,
+    composerHasNonPromptContent,
     compactSlashCommandAvailable,
     composerTrigger,
     environmentId,
