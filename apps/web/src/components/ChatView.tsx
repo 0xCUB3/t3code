@@ -462,6 +462,7 @@ import { SideChatHeader } from "./chat/SideChatHeader";
 import { useAsideTitles } from "../hooks/useAsideTitles";
 import { useSideChatActions } from "../hooks/useSideChatActions";
 import { parseSideCommand } from "../sideChat.logic";
+import { chatViewOf } from "./chat/composerEventScope";
 import { useRemoteOpenState } from "~/remoteOpen";
 import { shouldShowOpenInPicker } from "./chat/OpenInPicker.logic";
 import { useOpenFavoriteEditorShortcut } from "./chat/OpenInPickerShortcut";
@@ -641,6 +642,15 @@ const SIDE_CHAT_PASSTHROUGH_COMMANDS: ReadonlySet<KeybindingCommand> = new Set([
   "rightPanel.close",
   "rightPanel.toggle",
   "threadPanel.toggle",
+]);
+/** Shortcuts a side chat handles itself: its own run, composer, and queue. */
+const SIDE_CHAT_OWN_COMMANDS: ReadonlySet<KeybindingCommand> = new Set([
+  "thread.stop",
+  "modelPicker.toggle",
+  "composer.effort",
+  "composer.mode",
+  "thread.steerQueuedMessage",
+  "thread.editQueuedMessage",
 ]);
 function useDraftHeroLayoutTransition(
   isDraftHeroState: boolean,
@@ -8074,11 +8084,14 @@ export default function ChatView(props: ChatViewProps) {
   const closeThreadFind = useCallback(() => threadFindControlsRef.current?.close(), []);
 
   useEffect(() => {
-    if (embedded) return;
     const handler = (event: globalThis.KeyboardEvent) => {
-      // With focus in a side chat, only the panel layout shortcuts act here;
-      // thread shortcuts belong to this thread, not the side chat.
-      if (event.target instanceof Element && event.target.closest("[data-chat-embedded]")) {
+      const targetChat = chatViewOf(event.target);
+      if (embedded) {
+        // A side chat only answers keys pressed inside it.
+        if (targetChat === null || targetChat !== workspaceLayoutElement) return;
+      } else if (targetChat !== null && event.target instanceof Element) {
+        // With focus in a side chat, only the panel layout shortcuts act here;
+        // thread shortcuts belong to this thread, not the side chat.
         const command = resolveShortcutCommand(event, keybindings, {
           context: getShortcutContext(event.target),
         });
@@ -8119,6 +8132,7 @@ export default function ChatView(props: ChatViewProps) {
         context: shortcutContext,
       });
       if (!command) return;
+      if (embedded && !SIDE_CHAT_OWN_COMMANDS.has(command)) return;
 
       if (command === "thread.sideChat") {
         // Not offered here (drafts, older servers, inside a side chat): leave the key alone.
@@ -8404,13 +8418,15 @@ export default function ChatView(props: ChatViewProps) {
       focusComposer();
     };
     window.addEventListener("keydown", handler, true);
-    window.addEventListener("keydown", dismissFind);
+    // Find belongs to the host thread; a side chat has no find bar.
+    if (!embedded) window.addEventListener("keydown", dismissFind);
     return () => {
       window.removeEventListener("keydown", handler, true);
       window.removeEventListener("keydown", dismissFind);
     };
   }, [
     embedded,
+    workspaceLayoutElement,
     sideChatsAvailable,
     runSideChatCommand,
     activeProject,

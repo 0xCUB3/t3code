@@ -45,7 +45,8 @@ if (typeof document !== "undefined") {
   );
 }
 
-function chatViewOf(target: EventTarget | null): Element | null {
+/** The embedded side chat root that owns `target`, or null for the host chat. */
+export function chatViewOf(target: EventTarget | null): Element | null {
   if (!(target instanceof Element)) return null;
   if (isInsideComposerFloatingLayer(target)) return lastFocusedChat;
   return target.closest(EMBEDDED_CHAT_SELECTOR);
