@@ -867,6 +867,8 @@ type ChatViewProps =
        * terminals or global shortcuts of its own, and no nested side chats.
        */
       embedded?: boolean;
+      /** The host thread whose right panel shows what an embedded side chat opens. */
+      panelOwnerRef?: ScopedThreadRef;
     }
   | {
       environmentId: EnvironmentId;
@@ -877,6 +879,7 @@ type ChatViewProps =
       routeKind: "draft";
       draftId: DraftId;
       embedded?: never;
+      panelOwnerRef?: never;
     };
 
 interface TerminalLaunchContext {
@@ -1613,6 +1616,7 @@ export default function ChatView(props: ChatViewProps) {
     reserveTitleBarControlInset = true,
     forceExpandedMobileComposer = false,
     embedded = false,
+    panelOwnerRef,
   } = props;
   const canOperateThread = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
   const canOperateTerminal = useEnvironmentScope(environmentId, AuthTerminalOperateScope);
@@ -3822,12 +3826,14 @@ export default function ChatView(props: ChatViewProps) {
   );
   const openFileAttachment = useCallback(
     (attachment: ChatFileAttachment) => {
-      if (activeThreadRef) {
-        useRightPanelStore.getState().openAttachment(activeThreadRef, attachment);
+      // A side chat has no panel of its own; its attachments open in the host's.
+      const panelRef = panelOwnerRef ?? activeThreadRef;
+      if (panelRef) {
+        useRightPanelStore.getState().openAttachment(panelRef, attachment);
         return;
       }
     },
-    [activeThreadRef],
+    [activeThreadRef, panelOwnerRef],
   );
   const serverAttachmentResources = useMemo(
     () =>
@@ -11106,8 +11112,16 @@ export default function ChatView(props: ChatViewProps) {
       useDiffPanelStore.getState().selectTurn(activeThreadRef, runId, filePath);
       useRightPanelStore.getState().open(activeThreadRef, "diff");
       onDiffPanelOpen?.();
+      // The host's diff panel only knows the host's runs, so a side chat's diff
+      // opens with the side chat as a full thread, where its own panel renders.
+      if (embedded) {
+        void navigate({
+          to: "/$environmentId/$threadId",
+          params: buildThreadRouteParams(activeThreadRef),
+        });
+      }
     },
-    [activeThreadRef, diffOpen, isServerThread, onDiffPanelOpen],
+    [activeThreadRef, diffOpen, embedded, isServerThread, navigate, onDiffPanelOpen],
   );
   // The revert handler is read from a ref at call-time so the callback
   // reference is fully stable and never busts TimelineRowCtx identity.
@@ -12354,6 +12368,7 @@ function SideChatPanel(props: { parentRef: ScopedThreadRef; threadId: ThreadId }
     <ComposerHandleContext value={composerRef}>
       <ChatView
         embedded
+        panelOwnerRef={props.parentRef}
         routeKind="server"
         environmentId={props.parentRef.environmentId}
         threadId={props.threadId}
