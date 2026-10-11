@@ -14,6 +14,16 @@ panel next to the thread, stays out of the sidebar, and keeps working while the 
 - The command palette entry and the **Side Chat: Open or Start** shortcut, which you can set in
   keybinding settings, do the same as a bare `/side`.
 
+## Talking to a side chat
+
+Starting or reopening a side chat hands it the thread's composer. A **Side chat** banner above the
+composer says so, and every message you send goes to the side chat, without typing `/btw` again.
+Press Escape, or the banner's close button, to talk to the main thread again. Your draft for the
+main thread is still there. **Reply in side chat** at the bottom of the side chat switches back.
+
+If the main thread asks for an approval or an answer while you're in a side chat, a banner says
+so. Escape takes you to it.
+
 ## With or without history
 
 **With history** forks the thread at its last finished run, so a run still in progress is not part
