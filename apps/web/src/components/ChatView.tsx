@@ -641,6 +641,7 @@ const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnsw
 const SIDE_CHAT_PASSTHROUGH_COMMANDS: ReadonlySet<KeybindingCommand> = new Set([
   "rightPanel.close",
   "rightPanel.toggle",
+  "rightPanel.toggleMaximized",
   "threadPanel.toggle",
 ]);
 /** Shortcuts a side chat handles itself: its own run, composer, and queue. */
