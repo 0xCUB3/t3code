@@ -1541,6 +1541,10 @@ export interface ChatComposerProps {
   isServerThread: boolean;
   isLocalDraftThread: boolean;
   forceExpandedOnMobile: boolean;
+  /** Replaces the default placeholder when nothing else is asked of the user. */
+  idlePlaceholder?: string;
+  /** Escape with no composer menu open; return true when it was used. */
+  onEscape?: () => boolean;
   projectSelectionRequired: boolean;
 
   // Session phase
@@ -1735,6 +1739,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isServerThread: _isServerThread,
     isLocalDraftThread: _isLocalDraftThread,
     forceExpandedOnMobile,
+    idlePlaceholder,
+    onEscape,
     projectSelectionRequired,
     phase,
     canInterrupt,
@@ -4573,7 +4579,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     const menuIsActive =
       !isLiteralPendingAnswer && (composerMenuOpenRef.current || trigger !== null);
     if (key === "Escape") {
-      if (!menuIsActive || event.isComposing || event.keyCode === 229) return false;
+      if (event.isComposing || event.keyCode === 229) return false;
+      if (!menuIsActive) return onEscape?.() ?? false;
       dismissComposerTrigger(trigger);
       composerMenuOpenRef.current = false;
       return true;
@@ -7619,7 +7626,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                                 ? "Enable a provider in Settings to send a message"
                                 : phase === "disconnected"
                                   ? DISCONNECTED_COMPOSER_PLACEHOLDER
-                                  : "Ask anything, @tag files/folders, $use skills, or / for commands"
+                                  : (idlePlaceholder ??
+                                    "Ask anything, @tag files/folders, $use skills, or / for commands")
                     }
                     disabled={
                       isConnecting ||

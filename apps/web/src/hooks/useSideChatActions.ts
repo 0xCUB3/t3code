@@ -11,7 +11,11 @@ import { useComposerDraftStore } from "../composerDraftStore";
 import { newMessageId, newThreadId } from "../lib/utils";
 import { useRightPanelStore } from "../rightPanelStore";
 import { isEmptySideChat, quoteForSideChat, sideChatsOf } from "../sideChat.logic";
-import { useSideChatPreferenceStore, type SideChatHistoryChoice } from "../sideChatStore";
+import {
+  useSideChatFocusStore,
+  useSideChatPreferenceStore,
+  type SideChatHistoryChoice,
+} from "../sideChatStore";
 import {
   useEnvironmentSupportsSideChats,
   useThreadProjection,
@@ -98,6 +102,7 @@ export function useSideChatActions(parentRef: ScopedThreadRef | null) {
     (childThreadId: ThreadId) => {
       if (parentRef === null) return;
       useRightPanelStore.getState().openAside(parentRef, childThreadId);
+      useSideChatFocusStore.getState().focus(scopedThreadKey(parentRef), childThreadId);
     },
     [parentRef],
   );
@@ -153,6 +158,8 @@ export function useSideChatActions(parentRef: ScopedThreadRef | null) {
         return null;
       }
       useRightPanelStore.getState().openAside(ownerRef, childThreadId);
+      // The thread's composer talks to the side chat until Escape.
+      useSideChatFocusStore.getState().focus(scopedThreadKey(ownerRef), childThreadId);
       const question = input.question?.trim() ?? "";
       const quote = input.quote === undefined ? "" : quoteForSideChat(input.quote);
       if (question.length > 0) {

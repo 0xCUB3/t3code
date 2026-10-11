@@ -45,11 +45,19 @@ if (typeof document !== "undefined") {
   );
 }
 
-/** The embedded side chat root that owns `target`, or null for the host chat. */
-export function chatViewOf(target: EventTarget | null): Element | null {
+function chatIdOf(element: Element | null): string | null {
+  return element?.getAttribute("data-chat-embedded") ?? null;
+}
+
+/**
+ * The thread id of the side chat that owns `target`, or null for the host
+ * chat. A side chat's composer renders in the host's composer slot while it
+ * has focus, so ownership is the attribute's value, not one root element.
+ */
+export function chatViewOf(target: EventTarget | null): string | null {
   if (!(target instanceof Element)) return null;
-  if (isInsideComposerFloatingLayer(target)) return lastFocusedChat;
-  return target.closest(EMBEDDED_CHAT_SELECTOR);
+  if (isInsideComposerFloatingLayer(target)) return chatIdOf(lastFocusedChat);
+  return chatIdOf(target.closest(EMBEDDED_CHAT_SELECTOR));
 }
 
 /**
@@ -58,7 +66,7 @@ export function chatViewOf(target: EventTarget | null): Element | null {
  * check this to act on one composer only.
  */
 export function isInSameChatView(target: EventTarget | null, own: Element | null): boolean {
-  return chatViewOf(target) === (own?.closest(EMBEDDED_CHAT_SELECTOR) ?? null);
+  return chatViewOf(target) === chatIdOf(own?.closest(EMBEDDED_CHAT_SELECTOR) ?? null);
 }
 
 export function isInsideComposerFloatingLayer(target: EventTarget | null): boolean {
