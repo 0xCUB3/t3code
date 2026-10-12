@@ -56,6 +56,10 @@ const ROW_BOTTOM_MARGIN = 8;
 // so, rather than letting a page T3 never served pose as the app. This is not
 // a confidentiality boundary: a frame can always navigate itself, so the app
 // could carry anything it read out in a URL either way.
+//
+// A tap in the app also activates the outer page, its parent, so each relayed
+// message says whether the reader just used the app (`active`), the same user
+// activation web reads. The app cannot set it: it runs no code in this page.
 function outerDocument(src: string, allow: string, secret: string) {
   const attribute = (value: string) =>
     value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
@@ -63,7 +67,7 @@ function outerDocument(src: string, allow: string, secret: string) {
 <style>html,body{margin:0;height:100%;background:transparent}iframe{border:0;display:block;width:100%;height:100%}</style></head>
 <body><iframe id="app" sandbox="allow-scripts allow-forms" allow="${attribute(allow)}"></iframe>
 <script>(function(){var frame=document.getElementById("app"),secret=${JSON.stringify(secret)},loads=0,live=true;
-var send=function(m){window.ReactNativeWebView.postMessage(JSON.stringify({secret:secret,message:m}));};
+var send=function(m){var u=navigator.userActivation;window.ReactNativeWebView.postMessage(JSON.stringify({secret:secret,active:!!(u&&u.isActive)&&document.activeElement===frame,message:m}));};
 frame.addEventListener("load",function(){loads+=1;if(loads>1&&live){live=false;send({t3:"navigated"});}});
 window.addEventListener("message",function(e){if(live&&e.source===frame.contentWindow)send(e.data);});
 window.__t3McpAppReceive=function(m){live&&frame.contentWindow&&frame.contentWindow.postMessage(m,"*");};
@@ -96,12 +100,6 @@ const confirm = (title: string, message: string, action: string) =>
 
 /** Largest file an app may hand the user through `ui/download-file`. */
 const MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024;
-
-/**
- * How long after a touch in the app it may go full screen, the same window a
- * browser gives a click (transient user activation).
- */
-const FULLSCREEN_AFTER_TOUCH_MS = 5_000;
 
 /**
  * A captured MCP App, hosted in a WebView over the MCP Apps bridge: inline as
@@ -288,9 +286,9 @@ export function ThreadMcpApp(props: {
   }, [props.environmentId, props.threadId, props.itemId, app.tool]);
   const webView = useRef<WebView<object>>(null);
   const hostRef = useRef<McpAppHost | null>(null);
-  // When the reader last touched the app; a WebView has no user activation
-  // to ask, so full screen is gated on this instead.
-  const lastTouchAt = useRef(0);
+  // Whether the reader had just used the app when the message being handled
+  // was sent; the host reads it while handling that message.
+  const userActive = useRef(false);
 
   // One host per loaded document.
   useEffect(() => {
@@ -408,14 +406,15 @@ export function ThreadMcpApp(props: {
       },
       requestDisplayMode: async (mode) => {
         const current = latest.current.props;
-        // Full screen opens only right after the reader touched the app: one
-        // that asks on load or on every retry would otherwise reopen it each
-        // time the reader closes it, and the thread could never be reached.
-        // It would also cover the approval or question the agent waits on,
-        // or a screen the user moved to.
+        // Full screen opens only right after the reader used the app, as on
+        // web: one that asks on load or on every retry would otherwise reopen
+        // it each time the reader closes it, and the thread could never be
+        // reached. Read before any await, while this request is the message
+        // being handled. Full screen would also cover the approval or
+        // question the agent waits on, or a screen the user moved to.
         if (
           mode === "fullscreen" &&
-          (Date.now() - lastTouchAt.current > FULLSCREEN_AFTER_TOUCH_MS ||
+          (!userActive.current ||
             latest.current.awaitingUser ||
             !latest.current.navigation.isFocused())
         ) {
@@ -560,12 +559,7 @@ export function ThreadMcpApp(props: {
   }
 
   return (
-    <View
-      style={fullscreen ? { flex: 1 } : { height, marginBottom: ROW_BOTTOM_MARGIN }}
-      onTouchStart={() => {
-        lastTouchAt.current = Date.now();
-      }}
-    >
+    <View style={fullscreen ? { flex: 1 } : { height, marginBottom: ROW_BOTTOM_MARGIN }}>
       {navigatedAway ? (
         <View className="flex-1 items-center justify-center">
           <Text className="text-sm text-foreground-muted">
@@ -613,7 +607,9 @@ export function ThreadMcpApp(props: {
               setNavigatedAway(true);
               return;
             }
+            userActive.current = envelope.active === true;
             hostRef.current?.receive(message);
+            userActive.current = false;
           }}
         />
       ) : asset._tag === "Failure" || crashed ? (
