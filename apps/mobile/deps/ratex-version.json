@@ -1,0 +1,35 @@
+{
+  "tag": "v0.1.14+git.fad2f6c61ae6",
+  "xcframework": {
+    "url": "ratex-fad2f6c61ae6-ios.zip",
+    "sha256": "46474aff4042d5d1b4d02c0528ab56cb3f099cb78406314f38d7a913d434e603"
+  },
+  "source": {
+    "url": "https://github.com/erweixin/RaTeX/archive/fad2f6c61ae6f2334394522f1079cee901f20372.tar.gz",
+    "sha256": "ad2eba19fb8178c36412f1f80dc26f568b37ada7cb2f2221cb18bac54760a12a",
+    "prefix": "RaTeX-fad2f6c61ae6f2334394522f1079cee901f20372",
+    "swiftSources": [
+      "platforms/ios/Sources/Ratex/DisplayList.swift",
+      "platforms/ios/Sources/Ratex/RaTeXEngine.swift",
+      "platforms/ios/Sources/Ratex/RaTeXFontLoader.swift",
+      "platforms/ios/Sources/Ratex/RaTeXRenderer.swift"
+    ],
+    "fontsDir": "platforms/ios/Sources/Ratex/Fonts",
+    "license": "LICENSE"
+  },
+  "revision": "fad2f6c61ae6f2334394522f1079cee901f20372",
+  "android": {
+    "artifact": "ratex-fad2f6c61ae6-android.aar",
+    "sha256": "39445d5c84e6a6c3ca42b4322e734e626f537f5e01abae2115f0bd1349b9f448",
+    "baseArtifact": {
+      "url": "https://github.com/erweixin/RaTeX/releases/download/v0.1.14/ratex-android-release.aar",
+      "sha256": "dabcdf5870de5d74ca53a019e4c3fed843aa052bc6f7003dad0fb2cd63b6df41"
+    }
+  },
+  "build": {
+    "iosRustToolchain": "nightly-2026-08-16",
+    "androidRustToolchain": "1.99.0",
+    "cargoNdkVersion": "4.1.2",
+    "androidNdkVersion": "27.1.12297006"
+  }
+}

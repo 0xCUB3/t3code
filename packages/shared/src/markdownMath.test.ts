@@ -77,6 +77,17 @@ describe("chat math parsing", () => {
     }
   });
 
+  it("keeps prices as prose when math follows on the same line", () => {
+    for (const price of ["$5-$10", "$5 and $10", "$5/$10", "$20,000-$30,000"]) {
+      const source = `Price ${price} stays literal. The formula is $x_i$ and $5$.`;
+      expect(formulas(source)).toEqual([
+        ["inline", "x_i"],
+        ["inline", "5"],
+      ]);
+      expect(text(source)).toBe(`Price ${price} stays literal. The formula is  and .`);
+    }
+  });
+
   it("leaves code, escapes, links, and citations alone", () => {
     for (const [markdown, rendered] of [
       ["Use `$x$` in code.", "Use  in code."],

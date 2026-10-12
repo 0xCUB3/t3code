@@ -1,3 +1,29 @@
+diff --git a/android/build.gradle b/android/build.gradle
+index aadc664..2d1f9ed 100644
+--- a/android/build.gradle
++++ b/android/build.gradle
+@@ -297,7 +297,20 @@ dependencies {
+   implementation "androidx.profileinstaller:profileinstaller:1.3.1"
+   // LaTeX math rendering (optional — set enrichedMarkdown.enableMath=false in gradle.properties to exclude)
+   if (enableMath) {
+-    implementation("io.github.erweixin:ratex-android:0.1.14")
++    if (consumerConfig.ratexManifest) {
++      def manifestFile = new File(consumerPackageJson.parentFile, consumerConfig.ratexManifest.toString())
++      def manifest = new groovy.json.JsonSlurper().parse(manifestFile)
++      def artifact = new File(manifestFile.parentFile, manifest.android.artifact.toString())
++      def digest = java.security.MessageDigest.getInstance("SHA-256").digest(artifact.bytes).encodeHex().toString()
++      if (digest != manifest.android.sha256) throw new GradleException("RaTeX Android artifact checksum mismatch: ${artifact}")
++      implementation files(artifact)
++      // A local AAR has no Maven POM to supply RaTeX's unchanged wrapper dependencies.
++      implementation("androidx.annotation:annotation:1.7.1")
++      implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
++      implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
++    } else {
++      implementation("io.github.erweixin:ratex-android:0.1.14")
++    }
+   }
+   // Video playback (optional — set "enriched-markdown".enableVideo = false in package.json to exclude)
+   if (enableVideo) {
 diff --git a/android/src/main/java/com/swmansion/enriched/markdown/EnrichedMarkdownText.kt b/android/src/main/java/com/swmansion/enriched/markdown/EnrichedMarkdownText.kt
 index cd05d91..535a1c8 100644
 --- a/android/src/main/java/com/swmansion/enriched/markdown/EnrichedMarkdownText.kt
@@ -97,10 +123,10 @@ index a011cba..f1c0729 100644
  )
 diff --git a/android/src/main/java/com/swmansion/enriched/markdown/spans/ScrollableMathSpan.kt b/android/src/main/java/com/swmansion/enriched/markdown/spans/ScrollableMathSpan.kt
 new file mode 100644
-index 0000000..2433472
+index 0000000..67e0544
 --- /dev/null
 +++ b/android/src/main/java/com/swmansion/enriched/markdown/spans/ScrollableMathSpan.kt
-@@ -0,0 +1,13 @@
+@@ -0,0 +1,14 @@
 +package com.swmansion.enriched.markdown.spans
 +
 +/** Native text measurement and touch handling share this optional math contract. */
@@ -111,6 +137,7 @@ index 0000000..2433472
 +
 +interface ScrollableMathSpan : WidthAwareMathSpan {
 +  val latexSource: String
++  val displayMode: Boolean
 +  val maximumScrollOffset: Float
 +  var scrollOffset: Float
 +}
@@ -131,6 +158,58 @@ index 7e156aa..66ea56c 100644
        NodeType.Code -> {
          buffer.append("`")
          appendChildren(node, buffer)
+diff --git a/android/src/main/java/com/swmansion/enriched/markdown/utils/text/conversion/MarkdownExtractor.kt b/android/src/main/java/com/swmansion/enriched/markdown/utils/text/conversion/MarkdownExtractor.kt
+index ec5a034..ebebf52 100644
+--- a/android/src/main/java/com/swmansion/enriched/markdown/utils/text/conversion/MarkdownExtractor.kt
++++ b/android/src/main/java/com/swmansion/enriched/markdown/utils/text/conversion/MarkdownExtractor.kt
+@@ -107,7 +107,7 @@ object MarkdownExtractor {
+ 
+       val mathLatex = extractMathLatex(spannable, segmentStart, segmentEnd)
+       if (mathLatex != null) {
+-        result.append("$$mathLatex$")
++        result.append(mathLatex)
+         return true
+       }
+     }
+@@ -406,7 +406,10 @@ object MarkdownExtractor {
+       val spans = spannable.getSpans(start, end, mathInlineSpanClass)
+       if (spans.isEmpty()) return null
+       val latexField = mathInlineSpanClass.getDeclaredField("latex").apply { isAccessible = true }
+-      latexField.get(spans[0]) as? String
++      val latex = latexField.get(spans[0]) as? String ?: return null
++      val displayMode = mathInlineSpanClass.getDeclaredField("displayMode").apply { isAccessible = true }.getBoolean(spans[0])
++      val delimiter = if (displayMode) "\$\$" else "\$"
++      "$delimiter$latex$delimiter"
+     } catch (_: Exception) {
+       null
+     }
+diff --git a/android/src/main/java/com/swmansion/enriched/markdown/utils/text/extensions/SpannableExtensions.kt b/android/src/main/java/com/swmansion/enriched/markdown/utils/text/extensions/SpannableExtensions.kt
+index bab644d..5a0c131 100644
+--- a/android/src/main/java/com/swmansion/enriched/markdown/utils/text/extensions/SpannableExtensions.kt
++++ b/android/src/main/java/com/swmansion/enriched/markdown/utils/text/extensions/SpannableExtensions.kt
+@@ -6,6 +6,7 @@ import android.text.SpannableStringBuilder
+ import android.util.Log
+ import com.swmansion.enriched.markdown.spans.MathMeasureRequest
+ import com.swmansion.enriched.markdown.spans.MathMetrics
++import com.swmansion.enriched.markdown.spans.MathRenderMode
+ import com.swmansion.enriched.markdown.utils.common.FeatureFlags
+ 
+ fun SpannableStringBuilder.isInlineImage(): Boolean {
+@@ -27,12 +28,14 @@ fun Spannable.replaceMathSpansWithPlaceholders(context: Context) {
+ 
+     val fontSizeField = spanClass.getDeclaredField("fontSize").apply { isAccessible = true }
+     val latexField = spanClass.getDeclaredField("latex").apply { isAccessible = true }
++    val displayModeField = spanClass.getDeclaredField("displayMode").apply { isAccessible = true }
+ 
+     val requests =
+       mathSpans.map { span ->
+         MathMeasureRequest(
+           fontSize = fontSizeField.getFloat(span),
+           latex = latexField.get(span) as String,
++          mode = if (displayModeField.getBoolean(span)) MathRenderMode.Display else MathRenderMode.Text,
+         )
+       }
+ 
 diff --git a/android/src/main/java/com/swmansion/enriched/markdown/utils/text/span/WidthAwareSpans.kt b/android/src/main/java/com/swmansion/enriched/markdown/utils/text/span/WidthAwareSpans.kt
 index d43f479..a2a8e2d 100644
 --- a/android/src/main/java/com/swmansion/enriched/markdown/utils/text/span/WidthAwareSpans.kt
@@ -240,7 +319,7 @@ index 0000000..103a240
 +  }
 +}
 diff --git a/android/src/main/java/com/swmansion/enriched/markdown/utils/text/view/SelectionClipboard.kt b/android/src/main/java/com/swmansion/enriched/markdown/utils/text/view/SelectionClipboard.kt
-index 386aeea..0a1703e 100644
+index 386aeea..b18ace2 100644
 --- a/android/src/main/java/com/swmansion/enriched/markdown/utils/text/view/SelectionClipboard.kt
 +++ b/android/src/main/java/com/swmansion/enriched/markdown/utils/text/view/SelectionClipboard.kt
 @@ -1,6 +1,7 @@
@@ -251,17 +330,30 @@ index 386aeea..0a1703e 100644
  import com.swmansion.enriched.markdown.spans.LinkSpan
  import org.json.JSONObject
  
-@@ -39,7 +40,9 @@ internal fun canonicalClipboardText(
+@@ -39,7 +40,10 @@ internal fun canonicalClipboardText(
          config.linkTextByUrl[link.url]?.let { replacement ->
            Triple(text.getSpanStart(link).coerceAtLeast(0), text.getSpanEnd(link).coerceAtMost(text.length), replacement)
          }
 -      }.filter { it.second > it.first }
 +      }.plus(text.getSpans(0, text.length, ScrollableMathSpan::class.java).map {
-+        Triple(text.getSpanStart(it), text.getSpanEnd(it), "\$${it.latexSource}\$")
++        val delimiter = if (it.displayMode) "\$\$" else "\$"
++        Triple(text.getSpanStart(it), text.getSpanEnd(it), "$delimiter${it.latexSource}$delimiter")
 +      }).filter { it.second > it.first }
        .sortedByDescending { it.first }
    if (replacements.isEmpty()) return null
    return StringBuilder(text.toString())
+diff --git a/android/src/math/java/com/swmansion/enriched/markdown/renderer/MathInlineRenderer.kt b/android/src/math/java/com/swmansion/enriched/markdown/renderer/MathInlineRenderer.kt
+index 430ccf9..2d6d39a 100644
+--- a/android/src/math/java/com/swmansion/enriched/markdown/renderer/MathInlineRenderer.kt
++++ b/android/src/math/java/com/swmansion/enriched/markdown/renderer/MathInlineRenderer.kt
+@@ -37,6 +37,7 @@ class MathInlineRenderer(
+         latex = latex,
+         fontSize = fontSize,
+         textColor = config.style.inlineMathStyle.color,
++        displayMode = node.type == MarkdownASTNode.NodeType.LatexMathDisplay,
+         onLatexError = config.onLatexError,
+       )
+ 
 diff --git a/android/src/math/java/com/swmansion/enriched/markdown/segments/MathContainerView.kt b/android/src/math/java/com/swmansion/enriched/markdown/segments/MathContainerView.kt
 index c937222..67aec0d 100644
 --- a/android/src/math/java/com/swmansion/enriched/markdown/segments/MathContainerView.kt
@@ -309,12 +401,14 @@ index d930812..d958a1f 100644
  
    override fun draw(
 diff --git a/android/src/math/java/com/swmansion/enriched/markdown/spans/MathInlineSpan.kt b/android/src/math/java/com/swmansion/enriched/markdown/spans/MathInlineSpan.kt
-index 17864cb..09c7004 100644
+index 17864cb..afed39e 100644
 --- a/android/src/math/java/com/swmansion/enriched/markdown/spans/MathInlineSpan.kt
 +++ b/android/src/math/java/com/swmansion/enriched/markdown/spans/MathInlineSpan.kt
-@@ -17,7 +17,20 @@ class MathInlineSpan(
+@@ -16,8 +16,22 @@ class MathInlineSpan(
+   internal val latex: String,
    internal val fontSize: Float,
    private val textColor: Int,
++  override val displayMode: Boolean = false,
    private val onLatexError: LatexErrorReporter? = null,
 -) : ReplacementSpan() {
 +) : ReplacementSpan(), ScrollableMathSpan {
@@ -334,7 +428,26 @@ index 17864cb..09c7004 100644
    private var cachedBitmap: Bitmap? = null
    private var cachedWidth = 0
    private var mathAscent = 0f
-@@ -73,7 +86,8 @@ class MathInlineSpan(
+@@ -31,7 +45,7 @@ class MathInlineSpan(
+     if (renderFailed) return
+ 
+     try {
+-      val displayList = RaTeXEngine.parseBlocking(latex, displayMode = false, color = textColor)
++      val displayList = RaTeXEngine.parseBlocking(latex, displayMode = displayMode, color = textColor)
+       val renderer = RaTeXRenderer(displayList, fontSize) { RaTeXFontLoader.getTypeface(it) }
+ 
+       cachedWidth = renderer.widthPx.toInt().coerceAtLeast(1)
+@@ -49,7 +63,8 @@ class MathInlineSpan(
+       cachedBitmap = bitmap
+     } catch (e: Exception) {
+       renderFailed = true
+-      fallbackText = "\$" + latex + "\$"
++      val delimiter = if (displayMode) "\$\$" else "\$"
++      fallbackText = delimiter + latex + delimiter
+       onLatexError?.report(latex, e.message, false)
+     }
+   }
+@@ -73,7 +88,8 @@ class MathInlineSpan(
          descent = paintFm.descent
          bottom = paintFm.bottom
        }
@@ -344,7 +457,7 @@ index 17864cb..09c7004 100644
      }
  
      fm?.apply {
-@@ -81,10 +95,11 @@ class MathInlineSpan(
+@@ -81,10 +97,11 @@ class MathInlineSpan(
        ascent = -ascentPx
        top = ascent
        descent = (cachedBitmap?.height ?: ceil(mathAscent + mathDescent).toInt()) - ascentPx
@@ -357,7 +470,7 @@ index 17864cb..09c7004 100644
    }
  
    override fun draw(
-@@ -100,17 +115,35 @@ class MathInlineSpan(
+@@ -100,17 +117,35 @@ class MathInlineSpan(
    ) {
      prepareResources()
  
@@ -530,6 +643,18 @@ index 9584ace..5cb1540 100644
    CGFloat _mathAscent;
    CGFloat _mathDescent;
    ENRMRaTeXRenderResult *_renderResult;
+diff --git a/ios/renderer/ENRMMathInlineRenderer.m b/ios/renderer/ENRMMathInlineRenderer.m
+index 5a45362..cc1359c 100644
+--- a/ios/renderer/ENRMMathInlineRenderer.m
++++ b/ios/renderer/ENRMMathInlineRenderer.m
+@@ -25,6 +25,7 @@
+ 
+   ENRMMathInlineAttachment *attachment = [[ENRMMathInlineAttachment alloc] init];
+   attachment.latex = latex;
++  attachment.displayMode = node.type == MarkdownNodeTypeLatexMathDisplay;
+   attachment.fontSize = currentFont ? currentFont.pointSize : [_config paragraphFontSize];
+   attachment.mathTextColor = [_config inlineMathColor];
+   [context.mathReporters addObject:attachment];
 diff --git a/ios/segments/TableContainerView.m b/ios/segments/TableContainerView.m
 index 987eb21..47f0117 100644
 --- a/ios/segments/TableContainerView.m
@@ -660,6 +785,20 @@ index c6ce7ef..ffdee1a 100644
      case MarkdownNodeTypeCode:
        [buffer appendString:@"`"];
        serializeChildren(node, buffer);
+diff --git a/ios/utils/MarkdownExtractor.m b/ios/utils/MarkdownExtractor.m
+index 90c8450..2f6532b 100644
+--- a/ios/utils/MarkdownExtractor.m
++++ b/ios/utils/MarkdownExtractor.m
+@@ -192,7 +192,8 @@ NSString *_Nullable extractMarkdownFromAttributedString(NSAttributedString *attr
+                         if ([attachment isKindOfClass:[ENRMMathInlineAttachment class]]) {
+                           ENRMMathInlineAttachment *math = (ENRMMathInlineAttachment *)attachment;
+                           if (math.latex.length > 0) {
+-                            [result appendFormat:@"$%@$", math.latex];
++                            NSString *delimiter = math.displayMode ? @"$$" : @"$";
++                            [result appendFormat:@"%@%@%@", delimiter, math.latex, delimiter];
+                           }
+                           return;
+                         }
 diff --git a/ios/utils/PasteboardUtils.m b/ios/utils/PasteboardUtils.m
 index 3e8c15d..3d9af92 100644
 --- a/ios/utils/PasteboardUtils.m
@@ -801,3 +940,53 @@ index c790eb1..31032e9 100644
    [super setAttributedText:attributedText];
  }
  
+diff --git a/postinstall.mjs b/postinstall.mjs
+index b26215a..5911b0c 100644
+--- a/postinstall.mjs
++++ b/postinstall.mjs
+@@ -197,6 +197,7 @@ if (process.argv.includes('--resolve-config')) {
+   console.log(JSON.stringify({
+     workspaceDirs: initCwd ? listWorkspaceDirs(initCwd) : [],
+     config: resolveConsumerConfig(initCwd),
++    ratexManifest: resolveRatexManifest(initCwd),
+   }));
+   process.exit(0);
+ }
+@@ -257,7 +258,22 @@ console.log(`${LOG} restoring vendored native assets ...`);
+ const vendorGrammars = path.join(PKG_ROOT, 'vendor-grammars.mjs');
+ const vendorRatex = path.join(PKG_ROOT, 'vendor-ratex.mjs');
+ const vendorDir = path.join(PKG_ROOT, 'cpp/highlight/vendor');
+-const ratexManifest = path.join(PKG_ROOT, 'ratex-version.json');
++// An application can pin a tested engine snapshot while other consumers keep
++// the package's release. Resolve relative paths from that application's package.json.
++function resolveRatexManifest(initCwd) {
++  if (!initCwd) return path.join(PKG_ROOT, 'ratex-version.json');
++  const manifests = new Set();
++  for (const dir of [initCwd, ...listWorkspaceDirs(initCwd)]) {
++    const pkg = readJson(path.join(dir, 'package.json'));
++    const config = configOf(pkg);
++    if (dependsOnPackage(pkg) && config?.enableMath !== false && typeof config?.ratexManifest === 'string') {
++      manifests.add(path.resolve(dir, config.ratexManifest));
++    }
++  }
++  if (manifests.size > 1) throw new Error('Consuming applications configure different RaTeX manifests.');
++  return manifests.values().next().value ?? path.join(PKG_ROOT, 'ratex-version.json');
++}
++const ratexManifest = resolveRatexManifest(process.env.INIT_CWD);
+ const iosVendor = path.join(PKG_ROOT, 'ios/vendor');
+ 
+ let failed = false;
+diff --git a/vendor-ratex.mjs b/vendor-ratex.mjs
+index 82cab78..1bab514 100644
+--- a/vendor-ratex.mjs
++++ b/vendor-ratex.mjs
+@@ -140,6 +140,9 @@ async function main() {
+   const stampFile = path.join(outDir, '.stamp');
+ 
+   const m = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
++  for (const asset of [m.xcframework, m.source]) {
++    if (!/^https?:\/\//.test(asset.url)) asset.url = path.resolve(path.dirname(manifestPath), asset.url);
++  }
+   const key = stampKey(m);
+ 
+   if (!args.force && present(m, outDir) &&

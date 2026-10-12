@@ -41,6 +41,7 @@
     "config:prod": "APP_VARIANT=production expo config",
     "profile:android:hermes": "mkdir -p profiles/review && react-native profile-hermes profiles/review",
     "sync:pierre-icons": "node scripts/sync-pierre-file-icons.mjs",
+    "ratex:build": "node scripts/build-ratex.mjs",
     "generate": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/generate-uniwind-themes.mts",
     "test": "vp test run --config ../../vite.config.ts --dir .",
     "typecheck": "tsc-rs --noEmit"
@@ -151,6 +152,7 @@
   },
   "enriched-markdown": {
     "enableMath": true,
+    "ratexManifest": "deps/ratex-version.json",
     "enableVideo": false
   },
   "expo": {

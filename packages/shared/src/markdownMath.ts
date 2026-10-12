@@ -114,7 +114,15 @@ function mathText(delimiter: typeof DOLLAR | typeof BACKSLASH): Construct {
           last = code;
           return between;
         }
-        if (code === delimiter) return effects.attempt(closing, after, data)(code);
+        // A rejected single-dollar close belongs to prose or another formula.
+        // Do not skip across it and absorb a price into a later math span.
+        if (code === delimiter) {
+          return effects.attempt(
+            closing,
+            after,
+            delimiter === DOLLAR && size === 1 ? nok : data,
+          )(code);
+        }
         return data(code);
       }
 
