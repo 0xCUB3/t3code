@@ -98,6 +98,12 @@ const confirm = (title: string, message: string, action: string) =>
 const MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024;
 
 /**
+ * How long after a touch in the app it may go full screen, the same window a
+ * browser gives a click (transient user activation).
+ */
+const FULLSCREEN_AFTER_TOUCH_MS = 5_000;
+
+/**
  * A captured MCP App, hosted in a WebView over the MCP Apps bridge: inline as
  * a content-sized row of the thread feed, or full screen in its own modal screen. A
  * WebView cannot move between the two without reloading, so each is its own
@@ -282,6 +288,9 @@ export function ThreadMcpApp(props: {
   }, [props.environmentId, props.threadId, props.itemId, app.tool]);
   const webView = useRef<WebView<object>>(null);
   const hostRef = useRef<McpAppHost | null>(null);
+  // When the reader last touched the app; a WebView has no user activation
+  // to ask, so full screen is gated on this instead.
+  const lastTouchAt = useRef(0);
 
   // One host per loaded document.
   useEffect(() => {
@@ -399,11 +408,16 @@ export function ThreadMcpApp(props: {
       },
       requestDisplayMode: async (mode) => {
         const current = latest.current.props;
-        // Full screen would cover the approval or question the agent waits
-        // on, or a screen the user moved to.
+        // Full screen opens only right after the reader touched the app: one
+        // that asks on load or on every retry would otherwise reopen it each
+        // time the reader closes it, and the thread could never be reached.
+        // It would also cover the approval or question the agent waits on,
+        // or a screen the user moved to.
         if (
           mode === "fullscreen" &&
-          (latest.current.awaitingUser || !latest.current.navigation.isFocused())
+          (Date.now() - lastTouchAt.current > FULLSCREEN_AFTER_TOUCH_MS ||
+            latest.current.awaitingUser ||
+            !latest.current.navigation.isFocused())
         ) {
           return current.displayMode ?? "inline";
         }
@@ -546,7 +560,12 @@ export function ThreadMcpApp(props: {
   }
 
   return (
-    <View style={fullscreen ? { flex: 1 } : { height, marginBottom: ROW_BOTTOM_MARGIN }}>
+    <View
+      style={fullscreen ? { flex: 1 } : { height, marginBottom: ROW_BOTTOM_MARGIN }}
+      onTouchStart={() => {
+        lastTouchAt.current = Date.now();
+      }}
+    >
       {navigatedAway ? (
         <View className="flex-1 items-center justify-center">
           <Text className="text-sm text-foreground-muted">
