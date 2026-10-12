@@ -1,0 +1,803 @@
+diff --git a/android/src/main/java/com/swmansion/enriched/markdown/EnrichedMarkdownText.kt b/android/src/main/java/com/swmansion/enriched/markdown/EnrichedMarkdownText.kt
+index cd05d91..535a1c8 100644
+--- a/android/src/main/java/com/swmansion/enriched/markdown/EnrichedMarkdownText.kt
++++ b/android/src/main/java/com/swmansion/enriched/markdown/EnrichedMarkdownText.kt
+@@ -1,5 +1,6 @@
+ package com.swmansion.enriched.markdown
+ 
++import com.swmansion.enriched.markdown.utils.text.view.InlineMathTouch
+ import android.content.Context
+ import android.content.res.Configuration
+ import android.graphics.Canvas
+@@ -626,7 +627,10 @@ class EnrichedMarkdownText
+       spoilerOverlayDrawer = null
+     }
+ 
++    private val inlineMathTouch = InlineMathTouch(this)
++
+     override fun onTouchEvent(event: MotionEvent): Boolean {
++      if (inlineMathTouch.onTouchEvent(event)) return true
+       if (checkboxTouchHelper.onTouchEvent(event)) {
+         if (event.action == MotionEvent.ACTION_DOWN) {
+           cancelJSTouchForCheckboxTap(event)
+diff --git a/android/src/main/java/com/swmansion/enriched/markdown/segments/TableContainerView.kt b/android/src/main/java/com/swmansion/enriched/markdown/segments/TableContainerView.kt
+index 525a142..95e76ad 100644
+--- a/android/src/main/java/com/swmansion/enriched/markdown/segments/TableContainerView.kt
++++ b/android/src/main/java/com/swmansion/enriched/markdown/segments/TableContainerView.kt
+@@ -2,6 +2,7 @@ package com.swmansion.enriched.markdown.segments
+ 
+ import android.content.ClipData
+ import android.content.ClipboardManager
++import com.swmansion.enriched.markdown.spans.WidthAwareMathSpan
+ import android.content.Context
+ import android.graphics.Canvas
+ import android.graphics.Paint
+@@ -72,6 +73,8 @@ class TableContainerView(
+   private val scrollView =
+     HorizontalScrollView(context).apply {
+       isHorizontalScrollBarEnabled = true
++      isVerticalScrollBarEnabled = false
++      isScrollbarFadingEnabled = false
+       overScrollMode = View.OVER_SCROLL_NEVER
+       importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+       addView(
+@@ -170,7 +173,10 @@ class TableContainerView(
+       }
+   }
+ 
+-  private fun extractPlainText(node: MarkdownASTNode): String = node.content + node.children.joinToString("") { extractPlainText(it) }
++  private fun extractPlainText(node: MarkdownASTNode): String =
++    if (node.type == NodeType.LatexMathInline || node.type == NodeType.LatexMathDisplay)
++      MarkdownASTSerializer.serializeNode(node)
++    else node.content + node.children.joinToString("") { extractPlainText(it) }
+ 
+   private fun textAlignmentFromString(align: String?): Layout.Alignment =
+     when (align) {
+@@ -469,16 +475,19 @@ class TableContainerView(
+       texts.forEach { row ->
+         row.forEachIndexed { colIndex, cellText ->
+           // Images are sized in the row pass below, once the column width is known.
+-          prepareWidthAwareSpans(cellText, maxColumnWidth.toInt(), includeImages = false)
++          prepareWidthAwareSpans(cellText, maxColumnWidth.toInt(), includeImages = false, includeMath = false)
+           val layout =
+             StaticLayout.Builder
+               .obtain(cellText, 0, cellText.length, paint, maxColumnWidth.toInt())
+               .setIncludePad(false)
+               .build()
+           val textWidth: Float = (0 until layout.lineCount).maxOfOrNull { line -> layout.getLineWidth(line) } ?: 0f
+-          val effectiveWidth = if (cellHasBlockImage(cellText)) maxColumnWidth else ceil(textWidth)
++          val mathWidth = (cellText as? Spanned)?.getSpans(0, cellText.length, WidthAwareMathSpan::class.java)
++            ?.maxOfOrNull { it.naturalWidth().toFloat() } ?: 0f
++          val columnLimit = max(maxColumnWidth, mathWidth)
++          val effectiveWidth = max(mathWidth, if (cellHasBlockImage(cellText)) maxColumnWidth else ceil(textWidth))
+           columnWidths[colIndex] =
+-            max(columnWidths[colIndex], min(max(effectiveWidth + horizontalPadding, minColumnWidth), maxColumnWidth + horizontalPadding))
++            max(columnWidths[colIndex], min(max(effectiveWidth + horizontalPadding, minColumnWidth), columnLimit + horizontalPadding))
+         }
+       }
+ 
+@@ -487,7 +496,7 @@ class TableContainerView(
+           row
+             .mapIndexed { colIndex, cellText ->
+               val contentWidth = (columnWidths[colIndex] - horizontalPadding).toInt().coerceAtLeast(1)
+-              prepareWidthAwareSpans(cellText, contentWidth)
++              prepareWidthAwareSpans(cellText, contentWidth, includeMath = false)
+               val layout =
+                 StaticLayout.Builder
+                   .obtain(
+diff --git a/android/src/main/java/com/swmansion/enriched/markdown/spans/MathModels.kt b/android/src/main/java/com/swmansion/enriched/markdown/spans/MathModels.kt
+index a011cba..f1c0729 100644
+--- a/android/src/main/java/com/swmansion/enriched/markdown/spans/MathModels.kt
++++ b/android/src/main/java/com/swmansion/enriched/markdown/spans/MathModels.kt
+@@ -15,4 +15,5 @@ data class MathMetrics(
+   val width: Int,
+   val ascent: Float,
+   val descent: Float,
++  val indicatorHeight: Int = 0,
+ )
+diff --git a/android/src/main/java/com/swmansion/enriched/markdown/spans/ScrollableMathSpan.kt b/android/src/main/java/com/swmansion/enriched/markdown/spans/ScrollableMathSpan.kt
+new file mode 100644
+index 0000000..2433472
+--- /dev/null
++++ b/android/src/main/java/com/swmansion/enriched/markdown/spans/ScrollableMathSpan.kt
+@@ -0,0 +1,13 @@
++package com.swmansion.enriched.markdown.spans
++
++/** Native text measurement and touch handling share this optional math contract. */
++interface WidthAwareMathSpan {
++  fun setAvailableWidth(width: Int): Boolean
++  fun naturalWidth(): Int
++}
++
++interface ScrollableMathSpan : WidthAwareMathSpan {
++  val latexSource: String
++  val maximumScrollOffset: Float
++  var scrollOffset: Float
++}
+diff --git a/android/src/main/java/com/swmansion/enriched/markdown/utils/common/serialization/MarkdownASTSerializer.kt b/android/src/main/java/com/swmansion/enriched/markdown/utils/common/serialization/MarkdownASTSerializer.kt
+index 7e156aa..66ea56c 100644
+--- a/android/src/main/java/com/swmansion/enriched/markdown/utils/common/serialization/MarkdownASTSerializer.kt
++++ b/android/src/main/java/com/swmansion/enriched/markdown/utils/common/serialization/MarkdownASTSerializer.kt
+@@ -291,6 +291,12 @@ object MarkdownASTSerializer {
+         buffer.append("==")
+       }
+ 
++      NodeType.LatexMathInline -> {
++        buffer.append("\$")
++        appendChildren(node, buffer)
++        buffer.append("\$")
++      }
++
+       NodeType.Code -> {
+         buffer.append("`")
+         appendChildren(node, buffer)
+diff --git a/android/src/main/java/com/swmansion/enriched/markdown/utils/text/span/WidthAwareSpans.kt b/android/src/main/java/com/swmansion/enriched/markdown/utils/text/span/WidthAwareSpans.kt
+index d43f479..a2a8e2d 100644
+--- a/android/src/main/java/com/swmansion/enriched/markdown/utils/text/span/WidthAwareSpans.kt
++++ b/android/src/main/java/com/swmansion/enriched/markdown/utils/text/span/WidthAwareSpans.kt
+@@ -1,6 +1,8 @@
+ package com.swmansion.enriched.markdown.utils.text.span
+ 
+ import android.text.Spanned
++import android.text.style.LeadingMarginSpan
++import com.swmansion.enriched.markdown.spans.WidthAwareMathSpan
+ import com.swmansion.enriched.markdown.spans.ImageSpan
+ import com.swmansion.enriched.markdown.spans.LinkPillSpan
+ 
+@@ -15,6 +17,7 @@ fun prepareWidthAwareSpans(
+   text: CharSequence?,
+   widthPx: Int,
+   includeImages: Boolean = true,
++  includeMath: Boolean = true,
+ ): Boolean {
+   val spanned = text as? Spanned ?: return false
+   // widthPx == 1 is the coerceAtLeast(1) fallback for a not-yet-measured view. Priming
+@@ -26,5 +29,11 @@ fun prepareWidthAwareSpans(
+       .getSpans(0, spanned.length, ImageSpan::class.java)
+       .forEach { it.prepareForMeasurement(spanned, widthPx) }
+   }
+-  return pillsChanged
++  var mathChanged = false
++  if (includeMath) spanned.getSpans(0, spanned.length, WidthAwareMathSpan::class.java).forEach {
++    val margin = spanned.getSpans(spanned.getSpanStart(it), spanned.getSpanEnd(it), LeadingMarginSpan::class.java)
++      .sumOf { indent -> maxOf(indent.getLeadingMargin(true), indent.getLeadingMargin(false)) }
++    if (it.setAvailableWidth((widthPx - margin).coerceAtLeast(1))) mathChanged = true
++  }
++  return pillsChanged || mathChanged
+ }
+diff --git a/android/src/main/java/com/swmansion/enriched/markdown/utils/text/view/InlineMathTouch.kt b/android/src/main/java/com/swmansion/enriched/markdown/utils/text/view/InlineMathTouch.kt
+new file mode 100644
+index 0000000..103a240
+--- /dev/null
++++ b/android/src/main/java/com/swmansion/enriched/markdown/utils/text/view/InlineMathTouch.kt
+@@ -0,0 +1,68 @@
++package com.swmansion.enriched.markdown.utils.text.view
++
++import android.text.Spanned
++import android.view.MotionEvent
++import android.view.ViewConfiguration
++import android.widget.TextView
++import com.swmansion.enriched.markdown.spans.ScrollableMathSpan
++import kotlin.math.abs
++
++/** Scroll a wide native formula without handing horizontal drags to text selection. */
++class InlineMathTouch(private val view: TextView) {
++  private var active: ScrollableMathSpan? = null
++  private var startX = 0f
++  private var startY = 0f
++  private var startOffset = 0f
++  private var dragging = false
++
++  fun onTouchEvent(event: MotionEvent): Boolean {
++    when (event.actionMasked) {
++      MotionEvent.ACTION_DOWN -> {
++        active = null
++        dragging = false
++        val layout = view.layout ?: return false
++        val text = view.text as? Spanned ?: return false
++        val x = event.x - view.totalPaddingLeft + view.scrollX
++        val y = event.y - view.totalPaddingTop + view.scrollY
++        val line = layout.getLineForVertical(y.toInt())
++        if (y < layout.getLineTop(line) || y > layout.getLineBottom(line)) return false
++        // getOffsetForHorizontal chooses the nearest insertion point, which can
++        // be the character AFTER a wide replacement span. Inspect the whole line.
++        active = text.getSpans(layout.getLineStart(line), layout.getLineEnd(line), ScrollableMathSpan::class.java)
++          .firstOrNull { span ->
++            val start = text.getSpanStart(span)
++            val end = text.getSpanEnd(span)
++            val left = minOf(layout.getPrimaryHorizontal(start), layout.getPrimaryHorizontal(end))
++            val right = maxOf(layout.getPrimaryHorizontal(start), layout.getPrimaryHorizontal(end))
++            span.maximumScrollOffset > 0 && x >= left && x <= right
++          }
++        startX = event.x
++        startY = event.y
++        startOffset = active?.scrollOffset ?: 0f
++      }
++      MotionEvent.ACTION_MOVE -> {
++        val span = active ?: return false
++        val dx = event.x - startX
++        val dy = event.y - startY
++        if (!dragging) {
++          if (abs(dy) > abs(dx)) { active = null; return false }
++          if (abs(dx) < ViewConfiguration.get(view.context).scaledTouchSlop) return false
++          if (startOffset <= 0 && dx > 0) { active = null; return false }
++          dragging = true
++        }
++        view.parent?.requestDisallowInterceptTouchEvent(true)
++        span.scrollOffset = (startOffset - dx).coerceIn(0f, span.maximumScrollOffset)
++        view.invalidate()
++        return true
++      }
++      MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
++        val consumed = dragging
++        active = null
++        dragging = false
++        view.parent?.requestDisallowInterceptTouchEvent(false)
++        return consumed
++      }
++    }
++    return false
++  }
++}
+diff --git a/android/src/main/java/com/swmansion/enriched/markdown/utils/text/view/SelectionClipboard.kt b/android/src/main/java/com/swmansion/enriched/markdown/utils/text/view/SelectionClipboard.kt
+index 386aeea..0a1703e 100644
+--- a/android/src/main/java/com/swmansion/enriched/markdown/utils/text/view/SelectionClipboard.kt
++++ b/android/src/main/java/com/swmansion/enriched/markdown/utils/text/view/SelectionClipboard.kt
+@@ -1,6 +1,7 @@
+ package com.swmansion.enriched.markdown.utils.text.view
+ 
+ import android.text.Spanned
++import com.swmansion.enriched.markdown.spans.ScrollableMathSpan
+ import com.swmansion.enriched.markdown.spans.LinkSpan
+ import org.json.JSONObject
+ 
+@@ -39,7 +40,9 @@ internal fun canonicalClipboardText(
+         config.linkTextByUrl[link.url]?.let { replacement ->
+           Triple(text.getSpanStart(link).coerceAtLeast(0), text.getSpanEnd(link).coerceAtMost(text.length), replacement)
+         }
+-      }.filter { it.second > it.first }
++      }.plus(text.getSpans(0, text.length, ScrollableMathSpan::class.java).map {
++        Triple(text.getSpanStart(it), text.getSpanEnd(it), "\$${it.latexSource}\$")
++      }).filter { it.second > it.first }
+       .sortedByDescending { it.first }
+   if (replacements.isEmpty()) return null
+   return StringBuilder(text.toString())
+diff --git a/android/src/math/java/com/swmansion/enriched/markdown/segments/MathContainerView.kt b/android/src/math/java/com/swmansion/enriched/markdown/segments/MathContainerView.kt
+index c937222..67aec0d 100644
+--- a/android/src/math/java/com/swmansion/enriched/markdown/segments/MathContainerView.kt
++++ b/android/src/math/java/com/swmansion/enriched/markdown/segments/MathContainerView.kt
+@@ -74,6 +74,8 @@ class MathContainerView(
+ 
+     scrollView.apply {
+       isHorizontalScrollBarEnabled = true
++      isVerticalScrollBarEnabled = false
++      isScrollbarFadingEnabled = false
+       overScrollMode = View.OVER_SCROLL_NEVER
+       isFillViewport = true
+       importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+diff --git a/android/src/math/java/com/swmansion/enriched/markdown/spans/MathInlinePlaceholderSpan.kt b/android/src/math/java/com/swmansion/enriched/markdown/spans/MathInlinePlaceholderSpan.kt
+index d930812..d958a1f 100644
+--- a/android/src/math/java/com/swmansion/enriched/markdown/spans/MathInlinePlaceholderSpan.kt
++++ b/android/src/math/java/com/swmansion/enriched/markdown/spans/MathInlinePlaceholderSpan.kt
+@@ -8,7 +8,15 @@ import kotlin.math.roundToInt
+ /** Holds pre-computed math metrics for background-thread measurement. */
+ class MathInlinePlaceholderSpan(
+   private val metrics: MathMetrics,
+-) : ReplacementSpan() {
++) : ReplacementSpan(), WidthAwareMathSpan {
++  private var availableWidth = Int.MAX_VALUE
++  override fun naturalWidth() = metrics.width
++  override fun setAvailableWidth(width: Int): Boolean {
++    val changed = availableWidth != width
++    availableWidth = width
++    return changed
++  }
++
+   override fun getSize(
+     paint: Paint,
+     text: CharSequence?,
+@@ -20,9 +28,10 @@ class MathInlinePlaceholderSpan(
+       ascent = -metrics.ascent.roundToInt()
+       top = ascent
+       descent = metrics.descent.roundToInt()
++      if (metrics.width > availableWidth) descent += metrics.indicatorHeight
+       bottom = descent
+     }
+-    return metrics.width
++    return metrics.width.coerceAtMost(availableWidth)
+   }
+ 
+   override fun draw(
+diff --git a/android/src/math/java/com/swmansion/enriched/markdown/spans/MathInlineSpan.kt b/android/src/math/java/com/swmansion/enriched/markdown/spans/MathInlineSpan.kt
+index 17864cb..09c7004 100644
+--- a/android/src/math/java/com/swmansion/enriched/markdown/spans/MathInlineSpan.kt
++++ b/android/src/math/java/com/swmansion/enriched/markdown/spans/MathInlineSpan.kt
+@@ -17,7 +17,20 @@ class MathInlineSpan(
+   internal val fontSize: Float,
+   private val textColor: Int,
+   private val onLatexError: LatexErrorReporter? = null,
+-) : ReplacementSpan() {
++) : ReplacementSpan(), ScrollableMathSpan {
++  private var availableWidth = Int.MAX_VALUE
++  override val latexSource get() = latex
++  override var scrollOffset = 0f
++  override val maximumScrollOffset get() = (cachedWidth - availableWidth).coerceAtLeast(0).toFloat()
++  override fun naturalWidth(): Int { prepareResources(); return cachedWidth }
++  override fun setAvailableWidth(width: Int): Boolean {
++    val changed = availableWidth != width
++    availableWidth = width
++    scrollOffset = scrollOffset.coerceIn(0f, maximumScrollOffset)
++    return changed
++  }
++  private val indicatorHeight get() = ceil(8 * context.resources.displayMetrics.density).toInt()
++
+   private var cachedBitmap: Bitmap? = null
+   private var cachedWidth = 0
+   private var mathAscent = 0f
+@@ -73,7 +86,8 @@ class MathInlineSpan(
+         descent = paintFm.descent
+         bottom = paintFm.bottom
+       }
+-      return cachedWidth
++      if (cachedWidth > availableWidth) fm?.apply { descent += indicatorHeight; bottom = descent }
++      return cachedWidth.coerceAtMost(availableWidth)
+     }
+ 
+     fm?.apply {
+@@ -81,10 +95,11 @@ class MathInlineSpan(
+       ascent = -ascentPx
+       top = ascent
+       descent = (cachedBitmap?.height ?: ceil(mathAscent + mathDescent).toInt()) - ascentPx
++      if (cachedWidth > availableWidth) descent += indicatorHeight
+       bottom = descent
+     }
+ 
+-    return cachedWidth
++    return cachedWidth.coerceAtMost(availableWidth)
+   }
+ 
+   override fun draw(
+@@ -100,17 +115,35 @@ class MathInlineSpan(
+   ) {
+     prepareResources()
+ 
++    val viewportWidth = cachedWidth.coerceAtMost(availableWidth)
++    val overflow = cachedWidth > viewportWidth
++    val save = canvas.save()
++    canvas.clipRect(x, top.toFloat(), x + viewportWidth, bottom.toFloat())
+     val bitmap = cachedBitmap
+     if (bitmap != null) {
+       val bitmapY = y - ceil(mathAscent)
+-      canvas.drawBitmap(bitmap, x, bitmapY, paint)
+-      return
++      canvas.drawBitmap(bitmap, x - scrollOffset, bitmapY, paint)
+     }
+ 
+     fallbackText?.let { fallback ->
+       val originalColor = paint.color
+       paint.color = textColor
+-      canvas.drawText(fallback, x, y.toFloat(), paint)
++      canvas.drawText(fallback, x - scrollOffset, y.toFloat(), paint)
++      paint.color = originalColor
++    }
++    canvas.restoreToCount(save)
++    if (overflow) {
++      val originalColor = paint.color
++      val density = context.resources.displayMetrics.density
++      val trackWidth = (viewportWidth - 4 * density).coerceAtLeast(1f)
++      val thumbWidth = (trackWidth * viewportWidth / cachedWidth).coerceAtLeast(24 * density).coerceAtMost(trackWidth)
++      val left = x + 2 * density
++      val trackTop = (y + mathDescent + 4 * density)
++      paint.color = (textColor and 0x00ffffff) or 0x26000000
++      canvas.drawRoundRect(left, trackTop, left + trackWidth, trackTop + 3 * density, density, density, paint)
++      val thumbLeft = left + scrollOffset / maximumScrollOffset * (trackWidth - thumbWidth)
++      paint.color = (textColor and 0x00ffffff) or 0x73000000
++      canvas.drawRoundRect(thumbLeft, trackTop, thumbLeft + thumbWidth, trackTop + 3 * density, density, density, paint)
+       paint.color = originalColor
+     }
+   }
+diff --git a/android/src/math/java/com/swmansion/enriched/markdown/spans/MathMeasureHelper.kt b/android/src/math/java/com/swmansion/enriched/markdown/spans/MathMeasureHelper.kt
+index d0eda85..37a7aa7 100644
+--- a/android/src/math/java/com/swmansion/enriched/markdown/spans/MathMeasureHelper.kt
++++ b/android/src/math/java/com/swmansion/enriched/markdown/spans/MathMeasureHelper.kt
+@@ -40,6 +40,7 @@ object MathMeasureHelper {
+       renderer.widthPx.toInt(),
+       renderer.heightPx,
+       renderer.depthPx,
++      kotlin.math.ceil(8 * context.resources.displayMetrics.density).toInt(),
+     )
+   }
+ 
+diff --git a/cpp/md4c/md4c.c b/cpp/md4c/md4c.c
+index 4b39b01..4244a38 100644
+--- a/cpp/md4c/md4c.c
++++ b/cpp/md4c/md4c.c
+@@ -4699,6 +4699,11 @@ md_analyze_inlines(MD_CTX* ctx, const MD_LINE* lines, MD_SIZE n_lines, int table
+     ctx->unresolved_link_tail = -1;
+ 
+     if(table_mode) {
++        /* Math owns its pipes before GFM divides the row into cells. */
++        if(ctx->parser.flags & MD_FLAG_LATEXMATHSPANS) {
++            md_analyze_marks(ctx, lines, n_lines, 0, ctx->n_marks, _T("$"), NULL);
++            DOLLAR_OPENERS.top = -1;
++        }
+         /* (2) Analyze table cell boundaries. */
+         MD_ASSERT(n_lines == 1);
+         ctx->n_table_cell_boundaries = 0;
+diff --git a/ios/attachments/ENRMMathInlineAttachment.h b/ios/attachments/ENRMMathInlineAttachment.h
+index bccb200..37409ce 100644
+--- a/ios/attachments/ENRMMathInlineAttachment.h
++++ b/ios/attachments/ENRMMathInlineAttachment.h
+@@ -13,6 +13,12 @@ NS_ASSUME_NONNULL_BEGIN
+ @property (nonatomic, copy, nullable) ENRMLatexErrorHandler onLatexError;
+ 
+ @property (nonatomic, readonly) CGFloat boxHeight;
++@property (nonatomic, readonly) CGFloat formulaWidth;
++@property (nonatomic, assign) BOOL tableCell;
++#if !TARGET_OS_OSX
++@property (nonatomic, assign) CGFloat scrollOffset;
++@property (nonatomic, readonly) CGFloat maximumScrollOffset;
++#endif
+ 
+ #if TARGET_OS_OSX
+ /// Pre-renders the formula into self.image and sets self.bounds.
+diff --git a/ios/attachments/ENRMMathInlineAttachment.m b/ios/attachments/ENRMMathInlineAttachment.m
+index 9763eca..4fdd8de 100644
+--- a/ios/attachments/ENRMMathInlineAttachment.m
++++ b/ios/attachments/ENRMMathInlineAttachment.m
+@@ -11,6 +11,14 @@
+ 
+ @implementation ENRMMathInlineAttachment
+ 
++- (CGFloat)formulaWidth
++{
++#if !TARGET_OS_OSX
++  [self prepareIfNeeded];
++#endif
++  return _cachedSize.width;
++}
++
+ - (CGFloat)boxHeight
+ {
+ #if !TARGET_OS_OSX
+@@ -68,7 +76,17 @@
+                             characterIndex:(NSUInteger)characterIndex
+ {
+   [self prepareIfNeeded];
+-  return CGRectMake(0, -_mathDescent, _cachedSize.width, _cachedSize.height);
++  // A formula that fits remains an ordinary inline attachment. A wider one
++  // occupies one text line and scrolls within that line, rather than clipping.
++  CGFloat available = MAX(1, lineFragment.size.width - textContainer.lineFragmentPadding * 2);
++  _viewportWidth = self.tableCell ? _cachedSize.width : MIN(_cachedSize.width, available);
++  BOOL overflow = _cachedSize.width > _viewportWidth + 0.5;
++  return CGRectMake(0, -_mathDescent - (overflow ? 8 : 0), _viewportWidth, _cachedSize.height + (overflow ? 8 : 0));
++}
++
++- (CGFloat)maximumScrollOffset
++{
++  return MAX(0, _cachedSize.width - _viewportWidth);
+ }
+ 
+ - (UIImage *)imageForBounds:(CGRect)imageBounds
+@@ -82,19 +100,34 @@
+   UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat preferredFormat];
+   format.opaque = NO;
+ 
+-  UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:_cachedSize format:format];
++  CGSize viewport = imageBounds.size;
++  if (viewport.width <= 0 || viewport.height <= 0) viewport = _cachedSize;
++  BOOL overflow = _cachedSize.width > viewport.width + 0.5;
++  CGFloat offset = MIN(MAX(0, self.scrollOffset), MAX(0, _cachedSize.width - viewport.width));
++  UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:viewport format:format];
+ 
+   return [renderer imageWithActions:^(UIGraphicsImageRendererContext *rendererContext) {
++    CGContextRef ctx = rendererContext.CGContext;
++    CGContextSaveGState(ctx);
++    CGContextTranslateCTM(ctx, -offset, 0);
+     if (_renderResult) {
+-      CGContextRef ctx = rendererContext.CGContext;
+-      CGContextSaveGState(ctx);
+       [_renderResult drawIn:ctx];
+-      CGContextRestoreGState(ctx);
+     } else {
+       [_fallbackSource drawWithRect:CGRectMake(0, 0, _cachedSize.width, _cachedSize.height)
+                             options:NSStringDrawingUsesLineFragmentOrigin
+                             context:nil];
+     }
++    CGContextRestoreGState(ctx);
++    if (overflow) {
++      CGFloat trackWidth = MAX(1, viewport.width - 4);
++      CGFloat thumbWidth = MIN(trackWidth, MAX(24, trackWidth * viewport.width / _cachedSize.width));
++      CGFloat progress = offset / MAX(1, _cachedSize.width - viewport.width);
++      UIColor *color = self.mathTextColor ?: UIColor.labelColor;
++      [[color colorWithAlphaComponent:0.15] setFill];
++      [[UIBezierPath bezierPathWithRoundedRect:CGRectMake(2, viewport.height - 4, trackWidth, 3) cornerRadius:1.5] fill];
++      [[color colorWithAlphaComponent:0.45] setFill];
++      [[UIBezierPath bezierPathWithRoundedRect:CGRectMake(2 + progress * (trackWidth - thumbWidth), viewport.height - 4, thumbWidth, 3) cornerRadius:1.5] fill];
++    }
+   }];
+ }
+ 
+diff --git a/ios/attachments/ENRMMathInlineAttachmentShared.h b/ios/attachments/ENRMMathInlineAttachmentShared.h
+index 9584ace..5cb1540 100644
+--- a/ios/attachments/ENRMMathInlineAttachmentShared.h
++++ b/ios/attachments/ENRMMathInlineAttachmentShared.h
+@@ -8,6 +8,7 @@
+ 
+ @interface ENRMMathInlineAttachment () {
+   CGSize _cachedSize;
++  CGFloat _viewportWidth;
+   CGFloat _mathAscent;
+   CGFloat _mathDescent;
+   ENRMRaTeXRenderResult *_renderResult;
+diff --git a/ios/segments/TableContainerView.m b/ios/segments/TableContainerView.m
+index 987eb21..47f0117 100644
+--- a/ios/segments/TableContainerView.m
++++ b/ios/segments/TableContainerView.m
+@@ -3,6 +3,10 @@
+ #import "ENRMAccessibilityLabels.h"
+ #import "ENRMHorizontalScrollView.h"
+ #import "ENRMImageAttachment.h"
++#import "ENRMFeatureFlags.h"
++#if ENRICHED_MARKDOWN_MATH
++#import "ENRMMathInlineAttachment.h"
++#endif
+ #import "ENRMLinkPillAttachment.h"
+ #import "HTMLGenerator.h"
+ #import "LinkTapUtils.h"
+@@ -49,6 +53,8 @@ static NSString *ENRMTablePlainTextFromNode(MarkdownASTNode *node)
+ {
+   if (!node)
+     return @"";
++  if (node.type == MarkdownNodeTypeLatexMathInline || node.type == MarkdownNodeTypeLatexMathDisplay)
++    return markdownFromASTNode(node);
+   NSMutableString *buffer = [node.content mutableCopy] ?: [NSMutableString string];
+   for (MarkdownASTNode *child in node.children) {
+     [buffer appendString:ENRMTablePlainTextFromNode(child)];
+@@ -89,6 +95,12 @@ static NSMutableAttributedString *ENRMTableRenderCellNode(MarkdownASTNode *cellN
+ 
+   [context applyLinkAttributesToString:attributedText];
+   [context applyImageAttributesToString:attributedText];
++#if ENRICHED_MARKDOWN_MATH
++  [attributedText enumerateAttribute:NSAttachmentAttributeName inRange:NSMakeRange(0, attributedText.length)
++                            options:0 usingBlock:^(id value, NSRange range, BOOL *stop) {
++    if ([value isKindOfClass:ENRMMathInlineAttachment.class]) ((ENRMMathInlineAttachment *)value).tableCell = YES;
++  }];
++#endif
+ 
+   ENRMPinLineMetricsToStyledFonts(attributedText, NSMakeRange(0, attributedText.length));
+   ENRMApplyWritingDirectionMode(attributedText, writingDirectionMode, resolvedLayoutDirection);
+@@ -199,12 +211,21 @@ static void ENRMTableComputeLayout(NSArray<NSArray<TableCellData *> *> *rows, NS
+ 
+   for (NSArray<TableCellData *> *row in rows) {
+     for (NSUInteger column = 0; column < row.count; column++) {
++      __block CGFloat columnLimit = maximumColumnWidth;
++#if ENRICHED_MARKDOWN_MATH
++      NSAttributedString *cellText = row[column].attributedText;
++      [cellText enumerateAttribute:NSAttachmentAttributeName inRange:NSMakeRange(0, cellText.length)
++                          options:0 usingBlock:^(id value, NSRange range, BOOL *stop) {
++        if ([value isKindOfClass:ENRMMathInlineAttachment.class])
++          columnLimit = MAX(columnLimit, ((ENRMMathInlineAttachment *)value).formulaWidth);
++      }];
++#endif
+       CGRect boundingRect = [row[column].attributedText
+-          boundingRectWithSize:CGSizeMake(maximumColumnWidth, CGFLOAT_MAX)
++          boundingRectWithSize:CGSizeMake(columnLimit, CGFLOAT_MAX)
+                        options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading
+                        context:nil];
+       CGFloat width = MIN(MAX(ceil(boundingRect.size.width) + horizontalPadding, minimumColumnWidth),
+-                          maximumColumnWidth + horizontalPadding);
++                          columnLimit + horizontalPadding);
+       if (width > [colWidths[column] doubleValue])
+         colWidths[column] = @(width);
+     }
+diff --git a/ios/utils/ENRMHorizontalScrollView.m b/ios/utils/ENRMHorizontalScrollView.m
+index b98d10c..e3e2035 100644
+--- a/ios/utils/ENRMHorizontalScrollView.m
++++ b/ios/utils/ENRMHorizontalScrollView.m
+@@ -1,8 +1,46 @@
+ #import "ENRMHorizontalScrollView.h"
+ 
+-@implementation ENRMHorizontalScrollView
++@implementation ENRMHorizontalScrollView {
++#if !TARGET_OS_OSX
++  CALayer *_overflowTrack;
++  CALayer *_overflowThumb;
++#endif
++}
+ 
+ #if !TARGET_OS_OSX
++// One persistent native indicator. UIKit's fading indicator is disabled so it
++// cannot appear on top of this track while the user drags an equation or table.
++- (void)layoutSubviews
++{
++  [super layoutSubviews];
++  self.showsHorizontalScrollIndicator = NO;
++  CGFloat width = self.bounds.size.width;
++  CGFloat contentWidth = self.contentSize.width + self.adjustedContentInset.left + self.adjustedContentInset.right;
++  BOOL overflow = self.scrollEnabled && contentWidth > width + 0.5;
++  if (!_overflowTrack && overflow) {
++    _overflowTrack = [CALayer layer];
++    _overflowThumb = [CALayer layer];
++    _overflowTrack.cornerRadius = _overflowThumb.cornerRadius = 1.5;
++    [self.layer addSublayer:_overflowTrack];
++    [self.layer addSublayer:_overflowThumb];
++  }
++  [CATransaction begin];
++  [CATransaction setDisableActions:YES];
++  _overflowTrack.hidden = _overflowThumb.hidden = !overflow;
++  if (overflow) {
++    CGFloat trackWidth = MAX(width - 8, 1);
++    CGFloat thumbWidth = MIN(trackWidth, MAX(24, trackWidth * width / contentWidth));
++    CGFloat progress = MIN(1, MAX(0, (self.contentOffset.x + self.adjustedContentInset.left) / (contentWidth - width)));
++    CGFloat left = self.bounds.origin.x + 4;
++    CGFloat top = CGRectGetMaxY(self.bounds) - 4;
++    _overflowTrack.frame = CGRectMake(left, top, trackWidth, 3);
++    _overflowThumb.frame = CGRectMake(left + progress * (trackWidth - thumbWidth), top, thumbWidth, 3);
++    _overflowTrack.backgroundColor = [UIColor.labelColor colorWithAlphaComponent:0.15].CGColor;
++    _overflowThumb.backgroundColor = [UIColor.labelColor colorWithAlphaComponent:0.45].CGColor;
++  }
++  [CATransaction commit];
++}
++
+ - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer
+ {
+   if (gestureRecognizer == self.panGestureRecognizer &&
+diff --git a/ios/utils/MarkdownASTSerializer.m b/ios/utils/MarkdownASTSerializer.m
+index c6ce7ef..ffdee1a 100644
+--- a/ios/utils/MarkdownASTSerializer.m
++++ b/ios/utils/MarkdownASTSerializer.m
+@@ -74,6 +74,12 @@ static void serializeNode(MarkdownASTNode *node, NSMutableString *buffer)
+       [buffer appendString:@"=="];
+       break;
+ 
++    case MarkdownNodeTypeLatexMathInline:
++      [buffer appendString:@"$"];
++      serializeChildren(node, buffer);
++      [buffer appendString:@"$"];
++      break;
++
+     case MarkdownNodeTypeCode:
+       [buffer appendString:@"`"];
+       serializeChildren(node, buffer);
+diff --git a/ios/utils/PasteboardUtils.m b/ios/utils/PasteboardUtils.m
+index 3e8c15d..3d9af92 100644
+--- a/ios/utils/PasteboardUtils.m
++++ b/ios/utils/PasteboardUtils.m
+@@ -1,5 +1,9 @@
+ #import "PasteboardUtils.h"
+ #import "ENRMImageAttachment.h"
++#import "ENRMFeatureFlags.h"
++#if ENRICHED_MARKDOWN_MATH
++#import "ENRMMathInlineAttachment.h"
++#endif
+ #import "ENRMLinkPillText.h"
+ #import "HTMLGenerator.h"
+ #import "MarkdownExtractor.h"
+@@ -59,20 +63,27 @@ static void addHTMLData(NSMutableDictionary *items, NSAttributedString *attribut
+ static NSString *canonicalClipboardText(NSAttributedString *text, StyleConfig *config)
+ {
+   NSDictionary *links = config.selectionClipboard[@"linkTextByUrl"];
+-  if (![links isKindOfClass:NSDictionary.class])
+-    return nil;
++  if (![links isKindOfClass:NSDictionary.class]) links = @{};
+   NSMutableString *result = [text.string mutableCopy];
+   __block BOOL matched = NO;
+-  [text enumerateAttribute:NSLinkAttributeName
+-                   inRange:NSMakeRange(0, text.length)
+-                   options:NSAttributedStringEnumerationReverse
+-                usingBlock:^(id value, NSRange range, BOOL *stop) {
+-                  NSString *replacement = value ? links[[value description]] : nil;
+-                  if ([replacement isKindOfClass:NSString.class]) {
+-                    [result replaceCharactersInRange:range withString:replacement];
+-                    matched = YES;
+-                  }
+-                }];
++  [text enumerateAttributesInRange:NSMakeRange(0, text.length)
++                           options:NSAttributedStringEnumerationReverse
++                        usingBlock:^(NSDictionary *attributes, NSRange range, BOOL *stop) {
++    id link = attributes[NSLinkAttributeName];
++    NSString *replacement = link ? links[[link description]] : nil;
++#if ENRICHED_MARKDOWN_MATH
++    id attachment = attributes[NSAttachmentAttributeName];
++    if ([attachment isKindOfClass:ENRMMathInlineAttachment.class]) {
++      ENRMMathInlineAttachment *math = attachment;
++      NSString *delimiter = math.displayMode ? @"$$" : @"$";
++      replacement = [NSString stringWithFormat:@"%@%@%@", delimiter, math.latex, delimiter];
++    }
++#endif
++    if ([replacement isKindOfClass:NSString.class]) {
++      [result replaceCharactersInRange:range withString:replacement];
++      matched = YES;
++    }
++  }];
+   return matched ? result : nil;
+ }
+ 
+diff --git a/ios/views/ENRMMarkdownTextView.m b/ios/views/ENRMMarkdownTextView.m
+index c790eb1..31032e9 100644
+--- a/ios/views/ENRMMarkdownTextView.m
++++ b/ios/views/ENRMMarkdownTextView.m
+@@ -4,9 +4,13 @@
+ #import "ENRMTextHitTest.h"
+ #import "LinkTapUtils.h"
+ #import "PasteboardUtils.h"
++#import "ENRMFeatureFlags.h"
++#if ENRICHED_MARKDOWN_MATH
++#import "ENRMMathInlineAttachment.h"
++#endif
+ 
+ #if !TARGET_OS_OSX
+-@interface ENRMMarkdownTextView () <UIContextMenuInteractionDelegate>
++@interface ENRMMarkdownTextView () <UIContextMenuInteractionDelegate, UIGestureRecognizerDelegate>
+ @end
+ 
+ @implementation ENRMMarkdownTextView {
+@@ -15,6 +19,12 @@
+   // stands in for it: it would show through that image.
+   ENRMLinkPillAttachment *_liftedPill;
+   NSUInteger _pillMenuIndex;
++#if ENRICHED_MARKDOWN_MATH
++  UIPanGestureRecognizer *_mathPan;
++  ENRMMathInlineAttachment *_panningMath;
++  NSUInteger _panningMathIndex;
++  CGFloat _mathPanStartOffset;
++#endif
+ }
+ 
+ - (instancetype)initWithFrame:(CGRect)frame textContainer:(NSTextContainer *)textContainer
+@@ -24,14 +34,54 @@
+     __weak ENRMMarkdownTextView *weakSelf = self;
+     _pillLift.onEnd = ^{ [weakSelf restoreLiftedPill]; };
+     [self addInteraction:[[UIContextMenuInteraction alloc] initWithDelegate:self]];
++#if ENRICHED_MARKDOWN_MATH
++    _mathPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(scrollInlineMath:)];
++    _mathPan.delegate = self;
++    [self addGestureRecognizer:_mathPan];
++#endif
+   }
+   return self;
+ }
+ 
++#if ENRICHED_MARKDOWN_MATH
++- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer
++{
++  if (gestureRecognizer != _mathPan) return YES;
++  CGPoint velocity = [_mathPan velocityInView:self];
++  if (fabs(velocity.x) <= fabs(velocity.y)) return NO;
++  CGPoint point = [_mathPan locationInView:self];
++  NSUInteger index = ENRMCharacterIndexAtPoint(self, point);
++  if (index == NSNotFound || index >= self.textStorage.length) return NO;
++  id attachment = [self.textStorage attribute:NSAttachmentAttributeName atIndex:index effectiveRange:NULL];
++  if (![attachment isKindOfClass:ENRMMathInlineAttachment.class] ||
++      !CGRectContainsPoint([self pillFrameAtIndex:index], point)) return NO;
++  ENRMMathInlineAttachment *math = attachment;
++  if (math.maximumScrollOffset <= 0.5 || (math.scrollOffset <= 0.5 && velocity.x > 0)) return NO;
++  _panningMath = math;
++  _panningMathIndex = index;
++  _mathPanStartOffset = math.scrollOffset;
++  return YES;
++}
++
++- (void)scrollInlineMath:(UIPanGestureRecognizer *)pan
++{
++  if (!_panningMath) return;
++  _panningMath.scrollOffset = MIN(_panningMath.maximumScrollOffset,
++                                MAX(0, _mathPanStartOffset - [pan translationInView:self].x));
++  [self.layoutManager invalidateDisplayForCharacterRange:NSMakeRange(_panningMathIndex, 1)];
++  [self setNeedsDisplay];
++  if (pan.state == UIGestureRecognizerStateEnded || pan.state == UIGestureRecognizerStateCancelled)
++    _panningMath = nil;
++}
++#endif
++
+ /// New text moves or replaces the pill under its lifted image.
+ - (void)setAttributedText:(NSAttributedString *)attributedText
+ {
+   [_pillLift end];
++#if ENRICHED_MARKDOWN_MATH
++  _panningMath = nil;
++#endif
+   [super setAttributedText:attributedText];
+ }
+ 

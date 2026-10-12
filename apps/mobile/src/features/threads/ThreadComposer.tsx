@@ -76,6 +76,7 @@ import {
 import { VideoPreviewModal, type VideoPreviewSource } from "../../components/VideoPreviewModal";
 import { GlassSurface } from "../../components/GlassSurface";
 import { ComposerEditor, type ComposerEditorHandle } from "../../components/ComposerEditor";
+import { ComposerMathPreview } from "./ComposerMathPreview";
 import { fileRoutePathSegments } from "../files/filePath";
 import {
   ComposerActionButton,
@@ -378,7 +379,7 @@ export function ComposerSurface(props: {
 
 export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposerProps) {
   const project = useProject(scopeProjectRef(props.environmentId, props.selectedThread.projectId));
-  const { themeVariables: materialTheme } = useAppearancePreferences();
+  const { themeVariables: materialTheme, mathRenderingEnabled } = useAppearancePreferences();
   const composerPanel = materialTheme["--color-composer-panel"];
   const navigation = useNavigation();
   const foregroundColor = useUniwindTheme()["--color-foreground"];
@@ -1049,6 +1050,9 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                   color: foregroundColor,
                 }}
               />
+              {isExpanded && mathRenderingEnabled ? (
+                <ComposerMathPreview source={props.draftMessage} />
+              ) : null}
             </Animated.View>
             {!isExpanded && stripAttachments.length > 0 ? (
               <View className="flex-row gap-1 pl-1">

@@ -150,7 +150,7 @@
     "typescript": "catalog:"
   },
   "enriched-markdown": {
-    "enableMath": false,
+    "enableMath": true,
     "enableVideo": false
   },
   "expo": {

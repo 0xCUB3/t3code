@@ -1,3 +1,4 @@
+import { remarkThoughtPreview } from "~/markdown-thought-preview";
 import { ThreadFindTimelineContext } from "./ThreadFindProvider";
 import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
 import { MarkdownFindContext, useFindRevealRef } from "./markdownFindContext";
@@ -117,9 +118,6 @@ import {
 } from "../../lib/diffRendering";
 import { PREFERRED_HIGHLIGHTER } from "../../lib/syntaxHighlighting";
 import ChatMarkdown, { ChatMarkdownAssetImage } from "../ChatMarkdown";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import type { Root, RootContent } from "mdast";
 import { T3Wordmark } from "../T3Wordmark";
 import { ThreadContextChip } from "../ThreadContextChip";
 import {
@@ -295,7 +293,7 @@ import {
 import { SecretRequestCard } from "./SecretRequestCard";
 import { TimelineSystemDivider } from "./TimelineSystemDivider";
 
-import { SkillChipIcon, SkillInlineText } from "./SkillInlineText";
+import { SkillChipIcon } from "./SkillInlineText";
 import * as DateTime from "effect/DateTime";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 import { forwardWheelToTimeline } from "./timelineMinimapWheel";
@@ -4087,7 +4085,17 @@ function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "
               />
             </span>
           }
-          label={<span className="line-clamp-4">{thoughtLine}</span>}
+          label={
+            <span className="line-clamp-4">
+              <ChatMarkdown
+                inline
+                text={thoughtLine}
+                cwd={ctx.markdownCwd}
+                parseRawHtml={false}
+                extraRemarkPlugins={[[remarkThoughtPreview, "Thought"]]}
+              />
+            </span>
+          }
           wrapLabel
         />
       ) : null}
@@ -4107,14 +4115,13 @@ function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "
               </span>
             </span>
           ) : row.entry.itemType === "reasoning" ? (
-            <ReactMarkdown
-              remarkPlugins={[
-                remarkGfm,
-                [remarkThoughtPreview, row.active ? "Thinking" : "Thought"],
-              ]}
-            >
-              {row.entry.detail ?? label}
-            </ReactMarkdown>
+            <ChatMarkdown
+              inline
+              text={row.entry.detail ?? label}
+              cwd={ctx.markdownCwd}
+              parseRawHtml={false}
+              extraRemarkPlugins={[[remarkThoughtPreview, row.active ? "Thinking" : "Thought"]]}
+            />
           ) : threadLabel ? (
             <ThreadReadLabel
               label={threadLabel}
@@ -4924,7 +4931,13 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
       </div>
       {comment.text.length > 0 && (
         <div className="whitespace-pre-wrap wrap-break-word text-sm">
-          <SkillInlineText text={comment.text} skills={ctx.skills} />
+          <ChatMarkdown
+            text={comment.text}
+            cwd={ctx.markdownCwd}
+            skills={ctx.skills}
+            parseRawHtml={false}
+            lineBreaks
+          />
         </div>
       )}
       {fenceLanguage !== "diff" && comment.diff.trim().length > 0 && (
@@ -5399,28 +5412,6 @@ function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
 
 const stopRowToggle = (e: { stopPropagation: () => void }) => e.stopPropagation();
 
-function remarkThoughtPreview(fallback: string) {
-  return (tree: Root) => {
-    const plainText = (node: Root | RootContent): string => {
-      if (node.type === "html" || node.type === "definition") return "";
-      if ("alt" in node) return node.alt ?? "";
-      if ("value" in node) return node.value;
-      if ("children" in node) {
-        const separator = ["root", "blockquote", "list", "listItem", "table", "tableRow"].includes(
-          node.type,
-        )
-          ? " "
-          : "";
-        return node.children.map(plainText).join(separator);
-      }
-      return node.type === "break" ? " " : "";
-    };
-    tree.children = [
-      { type: "text", value: plainText(tree).replace(/\s+/g, " ").trim() || fallback },
-    ];
-  };
-}
-
 function ReasoningTraceContent({ entries }: { entries: ReadonlyArray<TimelineWorkEntry> }) {
   const ctx = use(TimelineRowCtx);
   const { isWorking, latestRunId } = use(TimelineRowActivityCtx);
@@ -5726,17 +5717,18 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
               className={cn(answerPreview ? "min-w-0" : "min-w-0 flex-1", "truncate", headingClass)}
             >
               {isReasoning && !expanded ? (
-                <ReactMarkdown
-                  remarkPlugins={[
-                    remarkGfm,
+                <ChatMarkdown
+                  inline
+                  text={workEntry.detail ?? previewText}
+                  cwd={ctx.markdownCwd}
+                  parseRawHtml={false}
+                  extraRemarkPlugins={[
                     [
                       remarkThoughtPreview,
                       workEntry.toolLifecycleStatus === "inProgress" ? "Thinking" : "Thought",
                     ],
                   ]}
-                >
-                  {workEntry.detail ?? previewText}
-                </ReactMarkdown>
+                />
               ) : threadLabel ? (
                 <ThreadReadLabel
                   label={threadLabel}
