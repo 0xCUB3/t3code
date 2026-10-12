@@ -20,6 +20,7 @@ if (platform !== "android" && NodeOS.platform() !== "darwin") {
   throw new Error("The iOS artifact requires macOS and Xcode.");
 }
 const temporary = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-ratex-build-"));
+const artifacts = [];
 const digest = (file) =>
   NodeCrypto.createHash("sha256").update(NodeFS.readFileSync(file)).digest("hex");
 function run(command, args, cwd = temporary, env = {}) {
@@ -67,7 +68,7 @@ try {
     run("bash", ["scripts/build-apple-xcframework.sh", "--ios"], source, {
       RATEX_IOS_RUST_TOOLCHAIN: toolchain,
     });
-    const output = NodePath.join(deps, manifest.xcframework.url);
+    const output = NodePath.join(temporary, manifest.xcframework.url);
     run("python3", [
       "-c",
       `
@@ -86,6 +87,7 @@ with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED, compressleve
       output,
     ]);
     manifest.xcframework.sha256 = digest(output);
+    artifacts.push({ source: output, destination: NodePath.join(deps, manifest.xcframework.url) });
   }
 
   if (platform !== "ios") {
@@ -127,7 +129,7 @@ with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED, compressleve
     });
     const base = NodePath.join(temporary, "release.aar");
     download(manifest.android.baseArtifact, base);
-    const output = NodePath.join(deps, manifest.android.artifact);
+    const output = NodePath.join(temporary, manifest.android.artifact);
     // Android's Kotlin wrapper and JNI API are unchanged since v0.1.14. Keep its
     // classes/fonts and replace every Rust library, so no released engine remains.
     run("python3", [
@@ -152,10 +154,14 @@ with zipfile.ZipFile(base) as source, zipfile.ZipFile(output, 'w', compression=z
     ]);
     run("python3", ["scripts/verify_android_elf.py", output], source);
     manifest.android.sha256 = digest(output);
+    artifacts.push({ source: output, destination: NodePath.join(deps, manifest.android.artifact) });
   }
 
   if (digest(NodePath.join(source, "Cargo.lock")) !== originalLock) {
     throw new Error("The build changed the pinned Cargo lock.");
+  }
+  for (const artifact of artifacts) {
+    NodeFS.copyFileSync(artifact.source, artifact.destination);
   }
   NodeFS.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
 } finally {

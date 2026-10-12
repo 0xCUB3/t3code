@@ -304,7 +304,7 @@ index d43f479..a2a8e2d 100644
 +  return pillsChanged || mathChanged
  }
 diff --git a/android/src/main/java/com/swmansion/enriched/markdown/utils/text/view/SelectionClipboard.kt b/android/src/main/java/com/swmansion/enriched/markdown/utils/text/view/SelectionClipboard.kt
-index 386aeea..ee13226 100644
+index 386aeea..8033da3 100644
 --- a/android/src/main/java/com/swmansion/enriched/markdown/utils/text/view/SelectionClipboard.kt
 +++ b/android/src/main/java/com/swmansion/enriched/markdown/utils/text/view/SelectionClipboard.kt
 @@ -1,6 +1,7 @@
@@ -315,18 +315,34 @@ index 386aeea..ee13226 100644
  import com.swmansion.enriched.markdown.spans.LinkSpan
  import org.json.JSONObject
  
-@@ -39,7 +40,10 @@ internal fun canonicalClipboardText(
-         config.linkTextByUrl[link.url]?.let { replacement ->
+@@ -32,7 +33,7 @@ internal fun canonicalClipboardText(
+   text: Spanned,
+   config: SelectionClipboardConfig,
+ ): String? {
+-  val replacements =
++  val links =
+     text
+       .getSpans(0, text.length, LinkSpan::class.java)
+       .mapNotNull { link ->
+@@ -40,7 +41,17 @@ internal fun canonicalClipboardText(
            Triple(text.getSpanStart(link).coerceAtLeast(0), text.getSpanEnd(link).coerceAtMost(text.length), replacement)
          }
--      }.filter { it.second > it.first }
-+      }.plus(text.getSpans(0, text.length, MathSourceSpan::class.java).map {
+       }.filter { it.second > it.first }
+-      .sortedByDescending { it.first }
++  val math =
++    text
++      .getSpans(0, text.length, MathSourceSpan::class.java)
++      .map {
 +        val delimiter = if (it.displayMode) "\$\$" else "\$"
 +        Triple(text.getSpanStart(it), text.getSpanEnd(it), "$delimiter${it.latexSource}$delimiter")
-+      }).filter { it.second > it.first }
-       .sortedByDescending { it.first }
++      }.filter { it.second > it.first }
++      .filter { formula ->
++        links.none { link -> formula.first < link.second && link.first < formula.second }
++      }
++  val replacements = (links + math).sortedByDescending { it.first }
    if (replacements.isEmpty()) return null
    return StringBuilder(text.toString())
+     .apply {
 diff --git a/android/src/math/java/com/swmansion/enriched/markdown/renderer/MathInlineRenderer.kt b/android/src/math/java/com/swmansion/enriched/markdown/renderer/MathInlineRenderer.kt
 index 430ccf9..2d6d39a 100644
 --- a/android/src/math/java/com/swmansion/enriched/markdown/renderer/MathInlineRenderer.kt
@@ -1134,7 +1150,7 @@ index 90c8450..2f6532b 100644
                            return;
                          }
 diff --git a/ios/utils/PasteboardUtils.m b/ios/utils/PasteboardUtils.m
-index 3e8c15d..3d9af92 100644
+index 3e8c15d..17573ac 100644
 --- a/ios/utils/PasteboardUtils.m
 +++ b/ios/utils/PasteboardUtils.m
 @@ -1,5 +1,9 @@
@@ -1147,7 +1163,7 @@ index 3e8c15d..3d9af92 100644
  #import "ENRMLinkPillText.h"
  #import "HTMLGenerator.h"
  #import "MarkdownExtractor.h"
-@@ -59,20 +63,27 @@ static void addHTMLData(NSMutableDictionary *items, NSAttributedString *attribut
+@@ -59,20 +63,37 @@ static void addHTMLData(NSMutableDictionary *items, NSAttributedString *attribut
  static NSString *canonicalClipboardText(NSAttributedString *text, StyleConfig *config)
  {
    NSDictionary *links = config.selectionClipboard[@"linkTextByUrl"];
@@ -1171,9 +1187,19 @@ index 3e8c15d..3d9af92 100644
 +                        usingBlock:^(NSDictionary *attributes, NSRange range, BOOL *stop) {
 +    id link = attributes[NSLinkAttributeName];
 +    NSString *replacement = link ? links[[link description]] : nil;
++    if ([replacement isKindOfClass:NSString.class]) {
++      NSRange linkRange;
++      [text attribute:NSLinkAttributeName
++              atIndex:range.location
++longestEffectiveRange:&linkRange
++              inRange:NSMakeRange(0, text.length)];
++      // Attribute runs can split a link around math. Copy its source once.
++      if (range.location != linkRange.location) return;
++      range = linkRange;
++    }
 +#if ENRICHED_MARKDOWN_MATH
 +    id attachment = attributes[NSAttachmentAttributeName];
-+    if ([attachment isKindOfClass:ENRMMathInlineAttachment.class]) {
++    if (![replacement isKindOfClass:NSString.class] && [attachment isKindOfClass:ENRMMathInlineAttachment.class]) {
 +      ENRMMathInlineAttachment *math = attachment;
 +      NSString *delimiter = math.displayMode ? @"$$" : @"$";
 +      replacement = [NSString stringWithFormat:@"%@%@%@", delimiter, math.latex, delimiter];
