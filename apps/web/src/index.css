@@ -1807,11 +1807,16 @@ code {
   overflow-x: auto;
   overflow-y: hidden;
   padding: 0.2em 0.15em;
-  scrollbar-width: none;
 }
 
 .chat-markdown-math-viewport::-webkit-scrollbar {
-  display: none;
+  height: 8px;
+}
+
+.chat-markdown-math-viewport::-webkit-scrollbar-thumb {
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background-clip: content-box;
 }
 
 .chat-markdown-math-content {
@@ -1825,29 +1830,6 @@ code {
 
 .chat-markdown-math-display .katex-display {
   margin: 0;
-}
-
-/* These stay visible at rest, independent of the OS overlay scrollbar setting. */
-.chat-markdown-math-scrollbar {
-  display: block;
-  position: relative;
-  height: 6px;
-  margin-top: 4px;
-  border-radius: 3px;
-  background: color-mix(in srgb, currentColor 16%, transparent);
-  touch-action: none;
-  cursor: pointer;
-}
-
-.chat-markdown-math-scrollbar[hidden] {
-  display: none;
-}
-
-.chat-markdown-math-scroll-thumb {
-  position: absolute;
-  height: 100%;
-  border-radius: 3px;
-  background: color-mix(in srgb, currentColor 55%, transparent);
 }
 
 .chat-markdown-math-source {
@@ -2145,6 +2127,18 @@ code {
 .chat-markdown .chat-markdown-table-container[data-expanded="true"] td {
   max-width: 24rem;
   overflow-wrap: anywhere;
+}
+
+/* Formula cells keep their natural width and scroll with the table. */
+.chat-markdown .chat-markdown-table-container td:has([data-markdown-math]) {
+  max-width: none;
+  overflow: visible;
+}
+
+.chat-markdown .chat-markdown-table-container [data-markdown-math],
+.chat-markdown .chat-markdown-table-container .chat-markdown-math-viewport {
+  max-width: none;
+  overflow: visible;
 }
 
 :root {
