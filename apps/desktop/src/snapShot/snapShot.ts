@@ -482,6 +482,7 @@ export function findAccessibleWindow<
     readonly bundleId?: string | undefined;
   },
   matchMode: "screen-bounds" | "wayland" = "screen-bounds",
+  options: { readonly allowUntitledUniqueBounds?: boolean } = {},
 ): T | undefined {
   const normalizeTitle = (value: string) => {
     const title = value.trim();
@@ -491,7 +492,6 @@ export function findAccessibleWindow<
   const titles = new Set(
     [captured.title, captured.sourceTitle ?? ""].map(normalizeTitle).filter(Boolean),
   );
-  if (titles.size === 0) return undefined;
   // Wayland accessibility providers can expose window size without a screen position.
   const boundsKeys =
     matchMode === "wayland"
@@ -501,7 +501,7 @@ export function findAccessibleWindow<
     matchMode === "wayland" && captured.clientBounds
       ? [captured.bounds, captured.clientBounds]
       : [captured.bounds];
-  const candidates = windows.filter((window) => {
+  const matchesBounds = (window: T) => {
     const bounds = window.bounds;
     return (
       bounds !== null &&
@@ -509,15 +509,35 @@ export function findAccessibleWindow<
         boundsKeys.every((key) => Math.abs(bounds[key] - candidate[key]) <= 2),
       )
     );
-  });
-  const matches = candidates.filter((window) => titles.has(normalizeTitle(window.name ?? "")));
-  if (matches.length === 1) return matches[0];
-  if (matches.length > 1) {
+  };
+  if (titles.size > 0) {
+    const matches = windows.filter(
+      (window) => titles.has(normalizeTitle(window.name ?? "")) && matchesBounds(window),
+    );
+    if (matches.length === 1) return matches[0];
     const activeMatches = matches.filter((window) => safeProperty(() => window.active) === true);
-    return activeMatches.length === 1 ? activeMatches[0] : undefined;
+    if (activeMatches.length === 1) return activeMatches[0];
+    if (matches.length > 1) return undefined;
+    const browserMatch = findBrowserTitleMatch(windows, titles, captured, matchMode, matchesBounds);
+    if (browserMatch) return browserMatch;
   }
+  // GTK4/libadwaita often exposes the frame as an unnamed group. A PID-scoped
+  // lookup can accept the one window whose bounds match; size-only guesses cannot.
+  if (!options.allowUntitledUniqueBounds) return undefined;
+  const boundsMatches = windows.filter(
+    (window) => normalizeTitle(window.name ?? "") === "" && matchesBounds(window),
+  );
+  return boundsMatches.length === 1 ? boundsMatches[0] : undefined;
+}
 
-  // Chrome's macOS AX title can append the browser and profile to the captured page title.
+// Chrome's macOS AX title can append the browser and profile to the captured page title.
+function findBrowserTitleMatch<T extends { readonly name?: string | null }>(
+  windows: readonly T[],
+  titles: ReadonlySet<string>,
+  captured: { readonly platform?: NodeJS.Platform; readonly bundleId?: string | undefined },
+  matchMode: "screen-bounds" | "wayland",
+  matchesBounds: (window: T) => boolean,
+): T | undefined {
   if (captured.platform !== "darwin" || matchMode !== "screen-bounds") return undefined;
   const browserName = /^com\.google\.Chrome(?:\.(?:beta|dev|canary))?$/.test(
     captured.bundleId ?? "",
@@ -527,7 +547,8 @@ export function findAccessibleWindow<
       ? "Chromium"
       : undefined;
   if (!browserName) return undefined;
-  const browserMatches = candidates.filter((window) => {
+  const browserMatches = windows.filter((window) => {
+    if (!matchesBounds(window)) return false;
     const name = window.name?.trim() ?? "";
     return [...titles].some((title) => {
       const prefix = `${title} - ${browserName}`;
