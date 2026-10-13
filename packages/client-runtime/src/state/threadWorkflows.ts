@@ -242,3 +242,32 @@ export function describeSideChatVisibility(input: {
   const run = input.parentRuns?.find((candidate) => candidate.id === runId);
   return run === undefined ? "Sees history" : `Sees up to run ${run.ordinal}`;
 }
+
+export interface SideChatListingShell {
+  readonly environmentId: string;
+  readonly id: string;
+  readonly sideChat?: boolean | undefined;
+  readonly deletedAt?: string | null | undefined;
+  readonly lineage?: { readonly parentThreadId: string | null } | undefined;
+}
+
+/**
+ * Builds the sidebar and palette test for "list this thread". A side chat stays
+ * out while its parent is around to list it; once the parent is deleted, a
+ * surviving side chat shows up like an ordinary thread instead of vanishing.
+ */
+export function makeSideChatListingFilter<T extends SideChatListingShell>(
+  threads: ReadonlyArray<T>,
+): (thread: T) => boolean {
+  const present = new Set(
+    threads.flatMap((thread) => (thread.deletedAt ? [] : [`${thread.environmentId}:${thread.id}`])),
+  );
+  return (thread) => {
+    const parentThreadId = thread.lineage?.parentThreadId;
+    return (
+      !thread.sideChat ||
+      !parentThreadId ||
+      !present.has(`${thread.environmentId}:${parentThreadId}`)
+    );
+  };
+}

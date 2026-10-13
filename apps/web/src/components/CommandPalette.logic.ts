@@ -13,7 +13,7 @@ import * as Result from "effect/Result";
 import { type ReactNode } from "react";
 import { getThreadSortTimestamp, sortThreads } from "../lib/threadSort";
 import { normalizeSearchText } from "../lib/utils";
-import { makeSideChatListingFilter } from "../sideChat.logic";
+import { makeSideChatListingFilter } from "@t3tools/client-runtime/state/thread-workflows";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import { type Project, type SidebarThreadSummary, type Thread } from "../types";
 

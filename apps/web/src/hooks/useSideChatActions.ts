@@ -94,6 +94,7 @@ export function useSideChatActions(parentRef: ScopedThreadRef | null) {
     (childThreadId: ThreadId) => {
       if (parentRef === null) return;
       useRightPanelStore.getState().closeSurface(parentRef, `aside:${childThreadId}`);
+      useSideChatFocusStore.getState().release(scopedThreadKey(parentRef), childThreadId);
     },
     [parentRef],
   );

@@ -1,17 +1,21 @@
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import type { ThreadId } from "@t3tools/contracts";
 
-import { retainSideChatView, useSideChatFocusStore } from "./sideChatStore";
+import { resolveFocusedSideChat, useSideChatFocusStore } from "./sideChatStore";
 
 const parentKey = "env:parent";
 const first = "first" as ThreadId;
 const second = "second" as ThreadId;
 
 const focused = () => useSideChatFocusStore.getState().byParent[parentKey];
-const settle = () => new Promise<void>((resolve) => queueMicrotask(resolve));
+const aside = (threadId: string) => ({
+  id: `aside:${threadId}` as const,
+  kind: "aside" as const,
+  threadId,
+});
 
 afterEach(() => {
-  useSideChatFocusStore.setState({ byParent: {}, slots: {} });
+  useSideChatFocusStore.setState({ byParent: {} });
 });
 
 describe("side chat focus", () => {
@@ -27,26 +31,20 @@ describe("side chat focus", () => {
     expect(focused()).toBeUndefined();
   });
 
-  it("keeps focus through an unmount that mounts again right away", async () => {
-    useSideChatFocusStore.getState().focus(parentKey, first);
+  it("counts only while the side chat's tab is the open panel's active one", () => {
+    const resolve = (input: Partial<Parameters<typeof resolveFocusedSideChat>[0]>) =>
+      resolveFocusedSideChat({
+        picked: first,
+        panelOpen: true,
+        activeSurface: aside(first),
+        ...input,
+      });
 
-    const unmount = retainSideChatView(parentKey, first);
-    unmount();
-    const remounted = retainSideChatView(parentKey, first);
-    await settle();
-    expect(focused()).toBe(first);
-
-    remounted();
-    await settle();
-    expect(focused()).toBeUndefined();
-  });
-
-  it("does not take focus from another side chat when one leaves", async () => {
-    const leaving = retainSideChatView(parentKey, first);
-    useSideChatFocusStore.getState().focus(parentKey, second);
-
-    leaving();
-    await settle();
-    expect(focused()).toBe(second);
+    expect(resolve({})).toBe(first);
+    expect(resolve({ panelOpen: false })).toBeNull();
+    expect(resolve({ activeSurface: aside(second) })).toBeNull();
+    expect(resolve({ activeSurface: { id: "diff", kind: "diff" } })).toBeNull();
+    expect(resolve({ activeSurface: null })).toBeNull();
+    expect(resolve({ picked: null })).toBeNull();
   });
 });

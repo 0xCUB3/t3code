@@ -1,6 +1,6 @@
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import type { RuntimeSubagent } from "@t3tools/client-runtime/state/subagentRuntime";
-import type { ThreadId } from "@t3tools/contracts";
+import type { KeybindingCommand, ThreadId } from "@t3tools/contracts";
 
 /**
  * A side chat is an ordinary thread whose `sideChat` flag moves it out of the
@@ -33,35 +33,6 @@ export function sideChatsOf<T extends SideChatShell>(
         thread.deletedAt === null,
     )
     .toSorted((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
-}
-
-interface SideChatListingShell {
-  readonly environmentId: string;
-  readonly id: string;
-  readonly sideChat?: boolean | undefined;
-  readonly deletedAt?: string | null | undefined;
-  readonly lineage?: { readonly parentThreadId: string | null } | undefined;
-}
-
-/**
- * Builds the sidebar and palette test for "list this thread". A side chat stays
- * out while its parent is around to list it; once the parent is deleted, a
- * surviving side chat shows up like an ordinary thread instead of vanishing.
- */
-export function makeSideChatListingFilter<T extends SideChatListingShell>(
-  threads: ReadonlyArray<T>,
-): (thread: T) => boolean {
-  const present = new Set(
-    threads.flatMap((thread) => (thread.deletedAt ? [] : [`${thread.environmentId}:${thread.id}`])),
-  );
-  return (thread) => {
-    const parentThreadId = thread.lineage?.parentThreadId;
-    return (
-      !thread.sideChat ||
-      !parentThreadId ||
-      !present.has(`${thread.environmentId}:${parentThreadId}`)
-    );
-  };
 }
 
 const SETTLED_RUN_STATUSES = new Set(["completed", "failed", "interrupted", "cancelled"]);
@@ -121,3 +92,20 @@ export function parseSideCommand(prompt: string): ParsedSideCommand | null {
   if (match === null) return null;
   return { command: match[1] as ParsedSideCommand["command"], question: (match[2] ?? "").trim() };
 }
+
+/** Panel layout shortcuts the host thread still handles while a side chat has focus. */
+export const SIDE_CHAT_PASSTHROUGH_COMMANDS: ReadonlySet<KeybindingCommand> = new Set([
+  "rightPanel.close",
+  "rightPanel.toggle",
+  "rightPanel.toggleMaximized",
+  "threadPanel.toggle",
+]);
+/** Shortcuts a side chat handles itself: its own run, composer, and queue. */
+export const SIDE_CHAT_OWN_COMMANDS: ReadonlySet<KeybindingCommand> = new Set([
+  "thread.stop",
+  "modelPicker.toggle",
+  "composer.effort",
+  "composer.mode",
+  "thread.steerQueuedMessage",
+  "thread.editQueuedMessage",
+]);

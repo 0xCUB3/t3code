@@ -26,7 +26,7 @@ import type { SidebarThreadSummary, Thread } from "../types";
 import { cn, normalizeSearchText } from "../lib/utils";
 import { isLatestRunSettled } from "../session-logic";
 import { resolveServerBackedAppStageLabel } from "../branding.logic";
-import { makeSideChatListingFilter } from "../sideChat.logic";
+import { makeSideChatListingFilter } from "@t3tools/client-runtime/state/thread-workflows";
 
 export function shouldNavigateAfterThreadPark(input: {
   readonly threadKey: string;

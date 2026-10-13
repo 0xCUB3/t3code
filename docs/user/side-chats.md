@@ -50,4 +50,5 @@ Use the menu in the side chat's header:
 Closing a side chat's tab keeps it under **Side chats** in the thread details, under **Previous**
 once it stops running. Closing one that never got a message discards it.
 
-On mobile, side chats show as ordinary threads for now.
+Side chats are on web and desktop. The mobile app leaves them out of its thread list; promote one
+to see it there.
