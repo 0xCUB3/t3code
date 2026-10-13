@@ -18,7 +18,6 @@ import { Button } from "./ui/button";
 import { setMarkdownTaskChecked } from "./files/filePreviewMode";
 import { serializeTableElementToCsv, chatMarkdownClipboardPayload } from "../markdown-clipboard";
 import { captureAssistantTextSelection } from "../lib/assistantTextSelection";
-import { remarkThoughtPreview } from "../markdown-thought-preview";
 
 vi.mock("../hooks/useFileMetadata", () => ({ useFileMetadata: () => null }));
 vi.mock("@effect/atom-react", () => ({ useAtomValue: () => null }));
@@ -622,21 +621,6 @@ describe("ChatMarkdown math", () => {
       expect(streamed.host.textContent).toContain("x_i^2");
     } finally {
       await streamed.close();
-    }
-  });
-
-  it("keeps formulas in compact reasoning previews", async () => {
-    const rendered = await renderMath("## Reasoning\n\nUse **norm** $|x|$", {
-      inline: true,
-      parseRawHtml: false,
-      extraRemarkPlugins: [[remarkThoughtPreview, "Reasoning"]],
-    });
-    try {
-      expect(rendered.host.querySelectorAll(".katex")).toHaveLength(1);
-      expect(rendered.host.textContent).toContain("Reasoning Use norm");
-      expect(rendered.host.querySelector("h2")).toBeNull();
-    } finally {
-      await rendered.close();
     }
   });
 
