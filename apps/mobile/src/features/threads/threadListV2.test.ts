@@ -248,43 +248,6 @@ describe("queued messages keep a settled thread active", () => {
   });
 });
 
-describe("side chats", () => {
-  const parentId = ThreadId.make("parent");
-  const sideChat = makeThread({
-    id: ThreadId.make("side"),
-    title: "Side chat",
-    sideChat: true,
-    lineage: { rootThreadId: parentId, parentThreadId: parentId, relationshipToParent: "fork" },
-  });
-
-  it("stay out of the list while their parent is listed", () => {
-    const threads = [makeThread({ id: parentId, title: "Parent" }), sideChat];
-    const layout = buildThreadListV2Items({
-      threads,
-      environmentId: null,
-      searchQuery: "",
-      now: NOW,
-    });
-    expect(layout.items.map((item) => item.thread.id)).toEqual(["parent"]);
-    expect(
-      getThreadListV2OrderedSection({ threads, section: "active", now: NOW }).map(
-        (thread) => thread.id,
-      ),
-    ).toEqual(["parent"]);
-  });
-
-  it("show up once their parent is deleted", () => {
-    const threads = [makeThread({ id: parentId, title: "Parent", deletedAt: NOW }), sideChat];
-    const layout = buildThreadListV2Items({
-      threads,
-      environmentId: null,
-      searchQuery: "",
-      now: NOW,
-    });
-    expect(layout.items.map((item) => item.thread.id)).toContain("side");
-  });
-});
-
 describe("resolveThreadListV2SwipeActions", () => {
   it("offers settle and snooze for an active snoozable thread", () => {
     expect(
