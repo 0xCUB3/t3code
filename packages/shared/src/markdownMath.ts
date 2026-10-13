@@ -411,7 +411,12 @@ function protectMathPipes(source: string) {
     if (node.type === "math" || node.type === "inlineMath") {
       const start = node.position?.start.offset;
       const end = node.position?.end.offset;
-      if (start !== undefined && end !== undefined && source.slice(start, end).includes("|")) {
+      if (start === undefined || end === undefined) return;
+      const authored = source.slice(start, end);
+      // A GFM cell cannot span rows. A prepass formula crossing a line ending
+      // must not hide the table's separators, even if it closes in a later row.
+      if (node.type === "inlineMath" && /[\r\n]/.test(authored)) return;
+      if (authored.includes("|")) {
         replacements.push({ start, end });
       }
     } else if ("children" in node) node.children.forEach(visit);
@@ -431,8 +436,9 @@ function protectMathPipes(source: string) {
 function restoreMathPipes(tree: Root, pipe: string | null) {
   const visit = (node: Root | Root["children"][number], inTable: boolean) => {
     const table = inTable || node.type === "tableCell";
+    // GFM may reinterpret a protected range. Never expose its placeholder as text.
+    if (pipe && "value" in node) node.value = node.value.replaceAll(pipe, "|");
     if (node.type === "math" || node.type === "inlineMath") {
-      if (pipe) node.value = node.value.replaceAll(pipe, "|");
       // GFM consumes one escaping backslash before a table pipe, including
       // inside code spans. TeX row separators before that escape stay intact.
       if (table) {

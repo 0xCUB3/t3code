@@ -155,6 +155,37 @@ describe("chat math parsing", () => {
 });
 
 describe("math in GFM tables", () => {
+  it.each(["\\(", "\\["])("keeps table rows intact when %s closes in a later row", (opener) => {
+    const closer = opener === "\\(" ? "\\)" : "\\]";
+    const source = `| Name | Value |\n| --- | --- |\n| first | ${opener}x |\n| second | y${closer} |\n| valid | $|z|$ |`;
+    const tree = parseMarkdownWithMath(source);
+    const table = tree.children[0];
+    expect(table?.type).toBe("table");
+    if (table?.type !== "table") throw new Error("Missing table");
+    expect(table.children.map((row) => row.children.length)).toEqual([2, 2, 2, 2]);
+    expect(
+      collect(tree)
+        .filter((node) => node.type === "text")
+        .map((node) => node.value),
+    ).toEqual([
+      "Name",
+      "Value",
+      "first",
+      opener.slice(1) + "x",
+      "second",
+      "y" + closer.slice(1),
+      "valid",
+    ]);
+    expect(markdownMathRanges(source)).toEqual([
+      expect.objectContaining({ source: "$|z|$", tex: "|z|" }),
+    ]);
+    expect(JSON.stringify(tree)).not.toMatch(/[\uE000-\uF8FF]/);
+  });
+
+  it("retains multiline math pipes outside tables", () => {
+    const source = "Outside \\(x|y\n+z\\) remains math.\n\n\\[\n|a|\n+|b|\n\\]";
+    expect(markdownMathRanges(source).map((range) => range.tex)).toEqual(["x|y\n+z", "|a|\n+|b|"]);
+  });
   it.each(["\\(\\frac{1}{|x|}\\)", "$$|x|$$", "$|x|$", "\\[|x|\\]"])(
     "keeps pipes inside %s in one cell and preserves source offsets",
     (formula) => {
