@@ -40,11 +40,14 @@ export function useSideChatGuest(input: {
     if (parentKey !== null) useSideChatFocusStore.getState().release(parentKey, threadId);
   }, [parentKey, threadId]);
 
+  // The composer remounts when it moves between the parent's slot and the panel
+  // (maximizing), so it takes the keyboard on every move, not just on focus.
+  const composerPlace = !focused ? null : sideChat?.composerSlot ? "slot" : "panel";
   useEffect(() => {
-    if (!focused) return;
+    if (composerPlace === null) return;
     const frame = requestAnimationFrame(() => composerRef.current?.focusAtEnd());
     return () => cancelAnimationFrame(frame);
-  }, [composerRef, focused]);
+  }, [composerPlace, composerRef]);
 
   // The parent's own questions stay one Escape away.
   const parentShell = useThreadShell(parentRef);
