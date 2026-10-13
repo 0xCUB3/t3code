@@ -2,6 +2,17 @@ import { describe, expect, it } from "@effect/vitest";
 import { enrichedMarkdownWithMath } from "./enrichedMarkdownMath";
 
 describe("native Enriched math input", () => {
+  it.each(["- b", "+ c", "> d", "# e"])("keeps %s inside multiline display math", (line) => {
+    expect(enrichedMarkdownWithMath(`$$\na \\\\\n${line}\n$$`)).toBe(`$$a \\\\ ${line}$$`);
+    expect(enrichedMarkdownWithMath(`> $$\n> a \\\\\n> ${line}\n> $$`)).toBe(
+      `> $$a \\\\ ${line}$$`,
+    );
+  });
+  it("removes TeX comments before folding line breaks, preserving escaped percent signs", () => {
+    expect(enrichedMarkdownWithMath("$$\nx% discarded\n+y \\% \\\\% discarded again\n+z\n$$")).toBe(
+      "$$x+y \\% \\\\+z$$",
+    );
+  });
   it("normalizes complete math while retaining surrounding Markdown", () => {
     expect(
       enrichedMarkdownWithMath("**Inline** \\(x_i\\) and $y_i$.\n\n\\[x^2\\]\n\n```math\na+b\n```"),

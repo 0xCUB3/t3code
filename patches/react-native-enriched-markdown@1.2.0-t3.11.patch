@@ -668,6 +668,47 @@ index 4b39b01..4244a38 100644
          /* (2) Analyze table cell boundaries. */
          MD_ASSERT(n_lines == 1);
          ctx->n_table_cell_boundaries = 0;
+diff --git a/ios/EnrichedMarkdown.mm b/ios/EnrichedMarkdown.mm
+index 9cd8217..a4c0977 100644
+--- a/ios/EnrichedMarkdown.mm
++++ b/ios/EnrichedMarkdown.mm
+@@ -1027,6 +1027,7 @@ static char kENRMSegmentFadeAnimatorKey;
+ 
+ - (void)configureTextView:(EnrichedMarkdownInternalText *)view withRenderedSegment:(ENRMRenderResult *)segment
+ {
++  view.dynamicProps = _dynamicBlockProps;
+   view.spoilerOverlay = _spoilerOverlay;
+   view.allowTrailingMargin = _allowTrailingMargin;
+   view.lastElementMarginBottom = segment.lastElementMarginBottom;
+diff --git a/ios/EnrichedMarkdownText.mm b/ios/EnrichedMarkdownText.mm
+index 43b3a37..a462511 100644
+--- a/ios/EnrichedMarkdownText.mm
++++ b/ios/EnrichedMarkdownText.mm
+@@ -11,6 +11,7 @@
+ #import "ENRMLinkRegexProps.h"
+ #import "ENRMMarkdownParser.h"
+ #import "ENRMMarkdownTextView.h"
++#import "ENRMDynamicBlockProps.h"
+ #import "ENRMSpoilerOverlayManager.h"
+ #import "ENRMSpoilerTapUtils.h"
+ #import "ENRMTailFadeInAnimator.h"
+@@ -777,6 +778,16 @@ typedef NS_OPTIONS(NSUInteger, ENRMDirtyFlags) {
+     _accessibilityNeedsRebuild = YES;
+   }
+ 
++#if ENRICHED_MARKDOWN_MATH && !TARGET_OS_OSX
++  ENRMMarkdownTextView *markdownTextView = (ENRMMarkdownTextView *)_textView;
++  if (!markdownTextView.mathDynamicProps)
++    markdownTextView.mathDynamicProps = [[ENRMDynamicBlockProps alloc] init];
++  markdownTextView.mathDynamicProps.enableBlockContextMenu = newViewProps.enableBlockContextMenu;
++  markdownTextView.mathDynamicProps.copyLabel = _selectionMenuLabels.copyLabel;
++  markdownTextView.mathDynamicProps.copyAsMarkdownLabel = _selectionMenuLabels.copyAsMarkdownLabel;
++  markdownTextView.mathAccessibilityLabels = _accessibilityLabels;
++#endif
++
+   if (newViewProps.streamingAnimation != oldViewProps.streamingAnimation) {
+     _streamingAnimation = newViewProps.streamingAnimation;
+     if (_streamingAnimation) {
 diff --git a/ios/attachments/ENRMMathInlineAttachment.h b/ios/attachments/ENRMMathInlineAttachment.h
 index bccb200..930b419 100644
 --- a/ios/attachments/ENRMMathInlineAttachment.h
@@ -760,6 +801,18 @@ index 5a45362..cc1359c 100644
    attachment.fontSize = currentFont ? currentFont.pointSize : [_config paragraphFontSize];
    attachment.mathTextColor = [_config inlineMathColor];
    [context.mathReporters addObject:attachment];
+diff --git a/ios/segments/ENRMBlockquoteContainerView.mm b/ios/segments/ENRMBlockquoteContainerView.mm
+index 5207c18..9046bd9 100644
+--- a/ios/segments/ENRMBlockquoteContainerView.mm
++++ b/ios/segments/ENRMBlockquoteContainerView.mm
+@@ -203,6 +203,7 @@ static UIEdgeInsets ENRMBlockquoteContentInsets(StyleConfig *config)
+                     createView:^RCTUIView *(ENRMRenderedSegment *segment) {
+                       ENRMBlockquoteContainerView *strongSelf = weakSelf;
+                       EnrichedMarkdownInternalText *view = [[EnrichedMarkdownInternalText alloc] initWithConfig:config];
++                      view.dynamicProps = strongSelf.dynamicProps;
+                       view.lastElementMarginBottom = segment.textResult.lastElementMarginBottom;
+                       view.accessibilityInfo = segment.textResult.accessibilityInfo;
+                       view.accessibilityLabels = strongSelf.accessibilityLabels;
 diff --git a/ios/segments/ENRMMathContainerView.h b/ios/segments/ENRMMathContainerView.h
 index e6fab59..5f5fcab 100644
 --- a/ios/segments/ENRMMathContainerView.h
@@ -985,10 +1038,10 @@ index 0000000..fe9a33a
 +#endif
 diff --git a/ios/utils/ENRMMathOverlayManager.m b/ios/utils/ENRMMathOverlayManager.m
 new file mode 100644
-index 0000000..2edf09f
+index 0000000..2431cdd
 --- /dev/null
 +++ b/ios/utils/ENRMMathOverlayManager.m
-@@ -0,0 +1,129 @@
+@@ -0,0 +1,135 @@
 +// Adapted from pingdotgg/t3chat bf1ddf5, preserving inline formula metrics and mode.
 +#import "ENRMMathOverlayManager.h"
 +
@@ -997,6 +1050,7 @@ index 0000000..2edf09f
 +#import "ENRMMathContainerView.h"
 +#import "ENRMAccessibilityLabels.h"
 +#import "ENRMMathInlineAttachment.h"
++#import "ENRMMarkdownTextView.h"
 +
 +@implementation ENRMMathOverlayManager {
 +  __weak ENRMPlatformTextView *_textView;
@@ -1100,6 +1154,11 @@ index 0000000..2edf09f
 +                  [textView addSubview:overlay];
 +                  self->_overlaysByKey[key] = overlay;
 +                }
++                ENRMMarkdownTextView *markdownTextView = (ENRMMarkdownTextView *)textView;
++                if (markdownTextView.mathDynamicProps)
++                  overlay.dynamicProps = markdownTextView.mathDynamicProps;
++                if (markdownTextView.mathAccessibilityLabels)
++                  overlay.accessibilityLabels = markdownTextView.mathAccessibilityLabels;
 +                overlay.frame = frame;
 +              }];
 +
@@ -1213,8 +1272,30 @@ index 3e8c15d..17573ac 100644
    return matched ? result : nil;
  }
  
+diff --git a/ios/views/ENRMMarkdownTextView.h b/ios/views/ENRMMarkdownTextView.h
+index 264ebb4..56e888b 100644
+--- a/ios/views/ENRMMarkdownTextView.h
++++ b/ios/views/ENRMMarkdownTextView.h
+@@ -2,6 +2,8 @@
+ #import "ENRMUIKit.h"
+ 
+ #import "ENRMLinkContextMenus.h"
++@class ENRMDynamicBlockProps;
++@class ENRMAccessibilityLabels;
+ 
+ #if !TARGET_OS_OSX
+ NS_ASSUME_NONNULL_BEGIN
+@@ -19,6 +21,8 @@ NS_ASSUME_NONNULL_BEGIN
+ /// Copies a selection the way the menu Copy does. Set by the hosting view, which knows the
+ /// source Markdown and style; without it the Copy key command writes plain text and RTF only.
+ @property (nonatomic, copy, nullable) void (^copySelectionHandler)(NSRange selectedRange);
++@property (nonatomic, strong, nullable) ENRMDynamicBlockProps *mathDynamicProps;
++@property (nonatomic, strong, nullable) ENRMAccessibilityLabels *mathAccessibilityLabels;
+ @end
+ 
+ NS_ASSUME_NONNULL_END
 diff --git a/ios/views/ENRMMarkdownTextView.m b/ios/views/ENRMMarkdownTextView.m
-index c790eb1..f5cb705 100644
+index c790eb1..f0719f4 100644
 --- a/ios/views/ENRMMarkdownTextView.m
 +++ b/ios/views/ENRMMarkdownTextView.m
 @@ -4,6 +4,8 @@
@@ -1237,7 +1318,7 @@ index c790eb1..f5cb705 100644
  }
  
  - (instancetype)initWithFrame:(CGRect)frame textContainer:(NSTextContainer *)textContainer
-@@ -33,7 +39,29 @@
+@@ -33,8 +39,37 @@
  {
    [_pillLift end];
    [super setAttributedText:attributedText];
@@ -1247,6 +1328,13 @@ index c790eb1..f5cb705 100644
 +}
 +
 +#if ENRICHED_MARKDOWN_MATH
++- (void)setMathAccessibilityLabels:(ENRMAccessibilityLabels *)mathAccessibilityLabels
++{
++  _mathAccessibilityLabels = mathAccessibilityLabels;
++  [_mathOverlayManager setNeedsUpdate];
++  [self setNeedsLayout];
+ }
+ 
 +- (void)layoutSubviews
 +{
 +  [super layoutSubviews];
@@ -1262,11 +1350,59 @@ index c790eb1..f5cb705 100644
 +    [_mathOverlayManager setNeedsUpdate];
 +  }
 +  [_mathOverlayManager updateIfNeeded];
- }
++}
 +#endif
- 
++
  /// The selection with pills expanded, or nil when `range` is not the selection or holds no pill.
  /// Only the selection is rewritten: UIKit also reads arbitrary ranges to find word boundaries,
+ /// and those must keep matching storage offsets.
+diff --git a/ios/views/EnrichedMarkdownInternalText.h b/ios/views/EnrichedMarkdownInternalText.h
+index dce09c7..c816375 100644
+--- a/ios/views/EnrichedMarkdownInternalText.h
++++ b/ios/views/EnrichedMarkdownInternalText.h
+@@ -10,6 +10,7 @@
+ @class AccessibilityInfo;
+ @class ENRMAccessibilityLabels;
+ @class ENRMSpoilerOverlayManager;
++@class ENRMDynamicBlockProps;
+ 
+ NS_ASSUME_NONNULL_BEGIN
+ 
+@@ -28,6 +29,7 @@ NS_ASSUME_NONNULL_BEGIN
+ 
+ @property (nonatomic, strong, nullable) AccessibilityInfo *accessibilityInfo;
+ @property (nonatomic, strong, nullable) ENRMAccessibilityLabels *accessibilityLabels;
++@property (nonatomic, strong, nullable) ENRMDynamicBlockProps *dynamicProps;
+ 
+ @property (nonatomic, strong) StyleConfig *config;
+ 
+diff --git a/ios/views/EnrichedMarkdownInternalText.m b/ios/views/EnrichedMarkdownInternalText.m
+index 817f190..cc3054b 100644
+--- a/ios/views/EnrichedMarkdownInternalText.m
++++ b/ios/views/EnrichedMarkdownInternalText.m
+@@ -68,6 +68,22 @@
+   _spoilerManager.spoilerOverlay = _spoilerOverlay;
+ }
+ 
++- (void)setDynamicProps:(ENRMDynamicBlockProps *)dynamicProps
++{
++  _dynamicProps = dynamicProps;
++#if !TARGET_OS_OSX
++  ((ENRMMarkdownTextView *)_textView).mathDynamicProps = dynamicProps;
++#endif
++}
++
++- (void)setAccessibilityLabels:(ENRMAccessibilityLabels *)accessibilityLabels
++{
++  _accessibilityLabels = accessibilityLabels;
++#if !TARGET_OS_OSX
++  ((ENRMMarkdownTextView *)_textView).mathAccessibilityLabels = accessibilityLabels;
++#endif
++}
++
+ - (void)setupLayoutManager
+ {
+   ENRMAttachLayoutManager(_textView, _config);
 diff --git a/postinstall.mjs b/postinstall.mjs
 index b26215a..5911b0c 100644
 --- a/postinstall.mjs

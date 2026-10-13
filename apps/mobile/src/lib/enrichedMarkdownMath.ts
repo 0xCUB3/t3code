@@ -5,6 +5,25 @@ import {
   parseMarkdownWithMath,
 } from "@t3tools/shared/markdownMath";
 
+/** Remove TeX line comments before folding whitespace, so a comment cannot
+ * swallow the rest of a formula when MD4C receives it on one Markdown line. */
+function mathOnOneLine(tex: string): string {
+  let result = "";
+  let slashes = 0;
+  for (let index = 0; index < tex.length; index++) {
+    const char = tex[index]!;
+    if (char === "%" && slashes % 2 === 0) {
+      index = tex.indexOf("\n", index);
+      if (index === -1) break;
+      slashes = 0;
+      continue;
+    }
+    result += char;
+    slashes = char === "\\" ? slashes + 1 : 0;
+  }
+  return result.replace(/\s*\n\s*/g, " ");
+}
+
 /** MD4C accepts dollar delimiters. Keep its native layout and rendering, while
  * sharing the web parser's delimiter, currency, code, and unfinished-math rules. */
 export function enrichedMarkdownWithMath(source: string): string {
@@ -15,8 +34,8 @@ export function enrichedMarkdownWithMath(source: string): string {
     end: range.end,
     value:
       range.display && !range.inTable
-        ? `$$${range.tex}$$`
-        : `$${range.tex.replace(/\s*\n\s*/g, " ")}$`,
+        ? `$$${mathOnOneLine(range.tex)}$$`
+        : `$${mathOnOneLine(range.tex)}$`,
   }));
   const visit = (node: Root | Root["children"][number]) => {
     if (node.type === "text") {

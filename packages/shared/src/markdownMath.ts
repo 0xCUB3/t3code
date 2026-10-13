@@ -487,14 +487,6 @@ export function markdownMathRanges(source: string, tree?: Root) {
   return ranges;
 }
 
-export function markdownMath(source: string) {
-  const ranges = markdownMathRanges(source);
-  const formula = ranges[0];
-  return ranges.length === 1 && formula?.start === 0 && formula.end === source.length
-    ? formula
-    : null;
-}
-
 /** Messages without these characters skip math parsing entirely. */
 export function mayContainMath(text: string): boolean {
   return (

@@ -95,6 +95,7 @@ describe("editable math source", () => {
     "\\[\\text{use $browser then @README.md and **literal**}\\]",
     "```math\nx_i + y_i\n```",
     "- **use** $x_i$ then @README.md",
+    "**$x_i$** and **A $x_i$ B**",
     "| Name | Formula |\n| --- | --- |\n| Norm | $|x|$ |",
     "| Name | Formula |\n| --- | --- |\n| Norm | \\(\\|x\\|\\) |",
   ])("keeps TeX editable and round trips its source: %s", (source) => {
@@ -118,6 +119,16 @@ describe("editable math source", () => {
     const state = EditorState.create({ doc });
     const next = state.apply(state.tr.insertText("c", position, position + 1));
     expect(serializeEditorDoc(next.doc).value).toBe(source.replace("{a}", "{c}"));
+  });
+  it("preserves formula source as text when styling is disabled", () => {
+    const source =
+      "\\[\n\\text{use $browser, @README.md and [file](t3-context://v1/file/ctx_1)}\n\\]";
+    const doc = plainSchema.nodeFromJSON(
+      buildDocJson(source, (name) => ({ label: name, description: null }), { styling: false }),
+    );
+    const map = serializeEditorDoc(doc);
+    expect(map.value).toBe(source);
+    expect(map.runs.some((run) => run.kind === "token")).toBe(false);
   });
 });
 
