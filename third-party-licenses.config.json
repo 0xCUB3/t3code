@@ -149,11 +149,7 @@
       "sourceUrl": "https://github.com/expo/expo"
     },
     {
-      "bundles": [
-        "ios",
-        "android",
-        "mobile"
-      ],
+      "bundles": ["ios", "android", "mobile"],
       "license": "MIT",
       "name": "RaTeX",
       "version": "0.1.14+git.fad2f6c61ae6",
@@ -161,20 +157,12 @@
       "generatedNotices": [
         {
           "licenseId": "MIT",
-          "copyrights": [
-            "Copyright (c) erweixin"
-          ]
+          "copyrights": ["Copyright (c) erweixin"]
         }
       ]
     },
     {
-      "bundles": [
-        "ios",
-        "android",
-        "mobile",
-        "web",
-        "desktop"
-      ],
+      "bundles": ["ios", "android", "mobile", "web", "desktop"],
       "license": "OFL-1.1",
       "name": "KaTeX mathematical fonts",
       "sourceUrl": "https://github.com/KaTeX/KaTeX",
