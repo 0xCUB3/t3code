@@ -134,7 +134,7 @@ const createRun = Effect.fn(function* (
 });
 
 it.effect.each(["startup", "shutdown"] as const)(
-  "%s cancels buffered provider wakes left behind by completed turns",
+  "%s cancels queued buffered wakes and holds durable messages",
   (trigger) =>
     Effect.gen(function* () {
       const projections = yield* ProjectionStore.ProjectionStoreV2;
@@ -142,21 +142,14 @@ it.effect.each(["startup", "shutdown"] as const)(
       const now = yield* DateTime.now;
       const bufferedThreads = [] as ThreadId[];
       const durableThreads = [] as ThreadId[];
-      for (const kind of [
-        "buffered",
-        "held-buffered",
-        "user",
-        "notification",
-        "delegated",
-      ] as const) {
+      for (const kind of ["buffered", "user", "notification", "delegated"] as const) {
         const threadId = yield* createThread(`wake:${trigger}:${kind}`);
-        const buffered = kind === "buffered" || kind === "held-buffered";
+        const buffered = kind === "buffered";
         (buffered ? bufferedThreads : durableThreads).push(threadId);
         const messageId = MessageId.make(`message:${threadId}`);
         const runId = yield* createRun(threadId, "queued", {
           userMessageId: messageId,
           startedAt: null,
-          queueHeld: kind !== "buffered",
           queuePosition: 1,
         });
         yield* createRun(threadId, "completed", { ordinal: 2 });
@@ -196,10 +189,10 @@ it.effect.each(["startup", "shutdown"] as const)(
       }
       assert.deepEqual(
         new Set(yield* projections.getRecoveryThreadIds("runtime")),
-        new Set(bufferedThreads),
+        new Set([...bufferedThreads, ...durableThreads]),
       );
       const summary = yield* recovery.reconcile(trigger);
-      assert.equal(summary.terminalizedRuns, 2);
+      assert.equal(summary.terminalizedRuns, 1);
       for (const threadId of bufferedThreads) {
         const projection = yield* projections.getThreadProjection(threadId);
         assert.equal(projection.runs[0]?.status, "cancelled");

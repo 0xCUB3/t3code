@@ -226,11 +226,10 @@ it.effect("Stop ends watches, holds queues, and stops the delegated tasks under 
 );
 
 it.effect.each(["thread.stop", "run.interrupt"] as const)(
-  "%s cancels buffered wakes, including held ones, and preserves durable queued messages",
+  "%s cancels buffered wakes and preserves durable queued messages",
   (type) =>
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
-      const projections = yield* ProjectionStore.ProjectionStoreV2;
       const threadId = ThreadId.make(`thread:stop-buffered:${type}`);
       yield* createWatchingThread(threadId, 5);
       yield* send(threadId, "active", "start_immediately");
@@ -259,15 +258,6 @@ it.effect.each(["thread.stop", "run.interrupt"] as const)(
           (message) => message.id === run.userMessageId && message.creationSource === "provider",
         ),
       )!;
-      // Also clean a wake that an earlier Stop or recovery already held.
-      yield* projections.apply({
-        id: EventId.make(`held:${type}`),
-        type: "run.updated",
-        threadId,
-        runId: buffered.id,
-        occurredAt: yield* DateTime.now,
-        payload: { ...buffered, queueHeld: true },
-      });
       const stop = { commandId: CommandId.make(`stop:${type}`), threadId };
       yield* orchestrator.dispatch(
         type === "run.interrupt"

@@ -69,7 +69,6 @@ import {
   isOrchestrationV2SupersededInterrupt,
 } from "@t3tools/shared/orchestrationV2Timeline";
 import { derivePendingBackgroundWork } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
-import { isBufferedProviderNotification } from "./NotificationMailbox.ts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -593,12 +592,7 @@ function needsRecovery(
         projection.runs.some(
           (run) =>
             ["preparing", "starting", "running", "waiting"].includes(run.status) ||
-            (run.status === "queued" &&
-              (run.queueHeld !== true ||
-                projection.messages.some(
-                  (message) =>
-                    message.id === run.userMessageId && isBufferedProviderNotification(message),
-                ))),
+            (run.status === "queued" && run.queueHeld !== true),
         ) ||
         projection.runtimeRequests.some((request) => request.status === "pending") ||
         projection.subagents.some(
@@ -3645,23 +3639,13 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 SELECT thread_id FROM orchestration_v2_projection_runs
                 WHERE status IN ('preparing', 'starting', 'running', 'waiting')
                 UNION
-                -- Held durable queues need no reread. Old buffered wakes still
-                -- need cancellation even if earlier recovery held them.
-                SELECT queued.thread_id FROM orchestration_v2_projection_runs AS queued
-                WHERE queued.status = 'queued'
-                  AND (CASE WHEN json_valid(queued.payload_json)
-                    THEN json_extract(queued.payload_json, '$.queueHeld') IS NOT 1
-                    ELSE 1 END OR EXISTS (
-                      SELECT 1 FROM orchestration_v2_projection_messages AS message
-                      WHERE message.message_id = CASE WHEN json_valid(queued.payload_json)
-                        THEN json_extract(queued.payload_json, '$.userMessageId') END
-                        AND CASE WHEN json_valid(message.payload_json) THEN
-                          json_extract(message.payload_json, '$.createdBy') = 'agent'
-                          AND json_extract(message.payload_json, '$.creationSource') = 'provider'
-                          AND json_type(message.payload_json, '$.notification') = 'object'
-                          AND json_type(message.payload_json, '$.delegatedCompletion') IS NULL
-                          ELSE 0 END
-                    ))
+                -- A held queue already went through recovery; rereading it on
+                -- every boot costs a projection read per held thread.
+                SELECT thread_id FROM orchestration_v2_projection_runs
+                WHERE status = 'queued'
+                  AND CASE WHEN json_valid(payload_json)
+                    THEN json_extract(payload_json, '$.queueHeld') IS NOT 1
+                    ELSE 1 END
                 UNION
                 SELECT thread_id FROM orchestration_v2_projection_runtime_requests
                 WHERE status = 'pending'
@@ -4207,18 +4191,12 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             `,
           sql<PayloadRow>`
               SELECT message.payload_json FROM orchestration_v2_projection_messages AS message
-              WHERE message.thread_id = ${threadId} AND (
-                (message.streaming = 1 AND message.run_id IN (
-                    SELECT run_id FROM orchestration_v2_projection_runs
-                    WHERE thread_id = ${threadId}
-                      AND status IN ('queued', 'preparing', 'starting', 'running', 'waiting')
-                  ))
-                OR message.message_id IN (
-                  SELECT json_extract(payload_json, '$.userMessageId')
-                  FROM orchestration_v2_projection_runs
-                  WHERE thread_id = ${threadId} AND status = 'queued'
+              WHERE message.thread_id = ${threadId} AND message.streaming = 1
+                AND message.run_id IN (
+                  SELECT run_id FROM orchestration_v2_projection_runs
+                  WHERE thread_id = ${threadId}
+                    AND status IN ('queued', 'preparing', 'starting', 'running', 'waiting')
                 )
-              )
               ORDER BY message.created_at ASC, message.message_id ASC
             `,
           sql<PayloadRow>`

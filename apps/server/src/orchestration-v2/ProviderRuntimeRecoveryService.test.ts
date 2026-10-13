@@ -147,7 +147,6 @@ it.effect("expires orphaned runtime requests before command readiness", () => {
     providerThreads: [],
     runs: [],
     nodes: [],
-    messages: [],
   } as unknown as OrchestrationV2ThreadProjection;
   const layer = ProviderRuntimeRecovery.layer.pipe(
     Layer.provide(ServerSettings.layerTest()),
@@ -198,7 +197,6 @@ it.effect("preserves async questions across startup and shutdown", () => {
     providerThreads: [],
     runs: [],
     nodes: [],
-    messages: [],
     turnItems: [],
   } as unknown as OrchestrationV2ThreadProjection;
   const commitCommand = vi.fn(() => Effect.die("an async question needs no process-loss write"));
@@ -249,7 +247,6 @@ it.effect("uses the same reconciliation path to cancel runtime requests during s
     providerThreads: [],
     runs: [],
     nodes: [],
-    messages: [],
   } as unknown as OrchestrationV2ThreadProjection;
   const layer = ProviderRuntimeRecovery.layer.pipe(
     Layer.provide(ServerSettings.layerTest()),
@@ -693,6 +690,7 @@ it.effect("holds accepted queued work without cancelling its execution state aft
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
           getRecoveryThreadIds: () => Effect.succeed([threadId]),
           getRuntimeRecoveryProjection: () => Effect.succeed(projection),
+          getThreadRecords: () => Effect.succeed(projection),
         }),
         Layer.mock(EventSink.EventSinkV2)({
           commitCommand: (input) => {
