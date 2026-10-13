@@ -257,13 +257,17 @@ jobs:
         working-directory: apps/mobile
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          MOBILE_SOURCEMAPS_R2: ${{ secrets.MOBILE_SOURCEMAPS_R2 }}
         run: |
           eas update \
             --channel production \
             --environment production \
             --platform ${{ inputs.platform }} \
             --message "${{ inputs.message || format('Production OTA ({0})', github.sha) }}" \
+            --emit-metadata \
             --non-interactive
+          # Lets the relay symbolicate crash stacks from this update. Never fails the step.
+          node scripts/upload-sourcemaps.mts ota dist
 
       # One pass per platform. The fingerprint decides OTA vs store build:
       #   - a finished build matches → publish the OTA;
@@ -280,6 +284,7 @@ jobs:
         working-directory: apps/mobile
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          MOBILE_SOURCEMAPS_R2: ${{ secrets.MOBILE_SOURCEMAPS_R2 }}
         run: |
           failed=0
           version="$(npx expo config --json --type public | jq -r '.version')"
@@ -300,8 +305,11 @@ jobs:
                 --environment production \
                 --platform "$platform" \
                 --message "$message" \
+                --emit-metadata \
                 --non-interactive; then
                 echo ":white_check_mark: $platform: OTA published to production (fingerprint \`$hash\`)" >> "$GITHUB_STEP_SUMMARY"
+                # Lets the relay symbolicate crash stacks from this update. Never fails the step.
+                node scripts/upload-sourcemaps.mts ota dist
               else
                 failed=1
                 echo ":x: $platform: OTA publish failed (fingerprint \`$hash\`)" >> "$GITHUB_STEP_SUMMARY"

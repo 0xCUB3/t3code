@@ -22,7 +22,8 @@
       "corepack": true,
       "env": {
         "APP_VARIANT": "preview",
-        "NODE_OPTIONS": "--max-old-space-size=4096"
+        "NODE_OPTIONS": "--max-old-space-size=4096",
+        "SOURCEMAP_FILE": "/tmp/t3code-ios-main.jsbundle.map"
       },
       "channel": "preview",
       "environment": "preview",
@@ -61,7 +62,8 @@
       "corepack": true,
       "env": {
         "APP_VARIANT": "production",
-        "NODE_OPTIONS": "--max-old-space-size=4096"
+        "NODE_OPTIONS": "--max-old-space-size=4096",
+        "SOURCEMAP_FILE": "/tmp/t3code-ios-main.jsbundle.map"
       },
       "channel": "production",
       "environment": "production",
