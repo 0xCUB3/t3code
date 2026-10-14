@@ -1129,7 +1129,7 @@ describe("ClaudeAdapterV2 worktree location follow", () => {
           prefix: "t3-claude-worktree-follow-",
         });
         let openedOptions: ClaudeAdapterV2.ClaudeAgentSdkQueryOptions | undefined;
-        const adapter = ClaudeAdapterV2.makeClaudeAdapterV2({
+        const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
           instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
           settings: DEFAULT_CLAUDE_SETTINGS,
           environment: {},
@@ -1148,6 +1148,7 @@ describe("ClaudeAdapterV2 worktree location follow", () => {
                   offer: () => Effect.void,
                   setModel: () => Effect.void,
                   setPermissionMode: () => Effect.void,
+                  stopTask: () => Effect.void,
                   interrupt: Effect.void,
                   close: Effect.void,
                 };
@@ -1229,7 +1230,11 @@ describe("ClaudeAdapterV2 worktree location follow", () => {
 
         yield* fireHook({ cwd: originalCwd, toolName: "ExitWorktree" });
         assert.equal(yield* nextSessionUpdate, originalCwd);
-      }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
     ),
   );
 });
