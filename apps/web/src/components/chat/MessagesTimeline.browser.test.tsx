@@ -838,6 +838,36 @@ describe("MessagesTimeline history and thread links", () => {
     expect(onOpenThread).toHaveBeenCalledWith("thread-parent");
   });
 
+  it("opens a thread at its newest message after an empty pane", async () => {
+    const props = baseProps();
+    const entries = Array.from({ length: 12 }, (_, index) =>
+      message(
+        Array.from({ length: 60 }, (_, line) => `Paragraph ${index}.${line}`).join("\n\n"),
+        { role: "assistant" },
+        `message-${index}`,
+      ),
+    );
+    const timeline = (routeThreadKey: string, timelineEntries: Entry[]) => (
+      <MessagesTimeline
+        {...props}
+        routeThreadKey={routeThreadKey}
+        timelineEntries={timelineEntries}
+        hideEmptyPlaceholder
+      />
+    );
+    await renderElement(timeline("environment-local:loading", []));
+
+    // The list mounts for this thread, with rows far taller than estimated.
+    await act(async () => roots.at(-1)!.render(timeline("environment-local:opened", entries)));
+    for (let frame = 0; frame < 20; frame += 1) {
+      await act(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+    }
+    const viewport = props.listRef.current!.getScrollableNode();
+    expect(viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop).toBeLessThanOrEqual(
+      1,
+    );
+  });
+
   it("does not render the transient V2 interruption request", async () => {
     await renderTimeline([
       {
