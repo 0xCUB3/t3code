@@ -1,456 +1,177 @@
 /// <reference types="mdast-util-to-hast" />
-import type { Root } from "mdast";
-import type { CompileContext, Extension as FromMarkdownExtension } from "mdast-util-from-markdown";
-import { mathFromMarkdown } from "mdast-util-math";
-import { fromMarkdown } from "mdast-util-from-markdown";
+import type { Root, RootContent } from "mdast";
+import remarkMath from "remark-math";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
 import { unified } from "unified";
-import type {
-  Code,
-  Construct,
-  Effects,
-  Extension as MicromarkExtension,
-  State,
-  Token,
-  TokenizeContext,
-} from "micromark-util-types";
 import type { Parser, Plugin } from "unified";
 
-declare module "micromark-util-types" {
-  interface TokenTypeMap {
-    mathFlow: "mathFlow";
-    mathFlowFence: "mathFlowFence";
-    mathFlowFenceSequence: "mathFlowFenceSequence";
-    mathFlowValue: "mathFlowValue";
-    mathText: "mathText";
-    mathTextData: "mathTextData";
-    mathTextSequence: "mathTextSequence";
-  }
-}
-
-const DOLLAR = 36;
-const BACKSLASH = 92;
-const RIGHT_PAREN = 41;
-const RIGHT_BRACKET = 93;
-const COMMA = 44;
-const BACKTICK = 96;
-const COLON = 58;
-const SLASH = 47;
-const CLOSERS: Partial<Record<number, number>> = { 40: RIGHT_PAREN, 91: RIGHT_BRACKET };
-// ponytail: an opener gives up after this many characters, which keeps a message
-// full of unmatched `$` close to linear. Raise it if real formulas hit the cap.
+const proseParser = unified().use(remarkParse).freeze();
 const MAX_MATH_LENGTH = 4096;
 
-// micromark encodes tabs, virtual spaces, and line endings as negative codes.
-const isLineEnding = (code: Code) => code !== null && code < -2;
-const isWhitespace = (code: Code) => code !== null && (code < 0 || code === 32);
-const isDigit = (code: Code) => code !== null && code >= 48 && code <= 57;
-
-/**
- * Tokenizes `$…$`, `$$…$$`, `\(…\)`, and `\[…\]` inside paragraphs. Code spans,
- * links, autolinks, and escapes keep their CommonMark meaning, because the parser
- * reaches them first or a formula refuses to span them. Source positions stay
- * those of the message.
- * Single-dollar math follows Pandoc so prices stay prose: it hugs its content,
- * stays on one line, and its closing `$` is not followed by a digit.
- */
-function mathText(delimiter: typeof DOLLAR | typeof BACKSLASH): Construct {
-  return {
-    name: delimiter === DOLLAR ? "chatDollarMath" : "chatBracketMath",
-    // A `$` right after another one is part of that run, unless the first was escaped.
-    ...(delimiter === DOLLAR
-      ? {
-          previous(this: TokenizeContext, code: Code) {
-            return code !== DOLLAR || this.events.at(-1)?.[1].type === "characterEscape";
-          },
-        }
-      : {}),
-    tokenize(effects, ok, nok) {
-      let size = 0;
-      let closer = DOLLAR;
-      let length = 0;
-      let last: Code = null;
-      let beforeLast: Code = null;
-      // `\[1\]` is a citation, not an equation.
-      let citation = true;
-      const closing: Construct = { partial: true, tokenize: tokenizeClosing };
-
-      return function start(code) {
-        effects.enter("mathText");
-        effects.enter("mathTextSequence");
-        if (delimiter === DOLLAR) return dollarOpening(code);
-        effects.consume(code);
-        return bracketOpening;
-      };
-
-      function dollarOpening(code: Code): State | undefined {
-        if (code === DOLLAR) {
-          if (++size > 2) return nok(code);
-          effects.consume(code);
-          return dollarOpening;
-        }
-        if (size === 1 && (code === null || isWhitespace(code))) return nok(code);
-        effects.exit("mathTextSequence");
-        return between(code);
-      }
-
-      function bracketOpening(code: Code): State | undefined {
-        const close = code === null ? undefined : CLOSERS[code];
-        if (close === undefined) return nok(code);
-        closer = close;
-        effects.consume(code);
-        effects.exit("mathTextSequence");
-        return between;
-      }
-
-      function between(code: Code): State | undefined {
-        if (code === null || length > MAX_MATH_LENGTH) return nok(code);
-        if (isLineEnding(code)) {
-          if (delimiter === DOLLAR && size === 1) return nok(code);
-          effects.enter("lineEnding");
-          effects.consume(code);
-          effects.exit("lineEnding");
-          last = code;
-          return between;
-        }
-        // A rejected single-dollar close belongs to prose or another formula.
-        // Do not skip across it and absorb a price into a later math span.
-        if (code === delimiter) {
-          return effects.attempt(
-            closing,
-            after,
-            delimiter === DOLLAR && size === 1 ? nok : data,
-          )(code);
-        }
-        return data(code);
-      }
-
-      function data(code: Code): State | undefined {
-        effects.enter("mathTextData");
-        return dataCharacter(code);
-      }
-
-      /** Consumes one character; a backslash takes the next one along. */
-      function dataCharacter(code: Code): State | undefined {
-        // Code spans and URLs outrank math, and TeX has no use for a backtick or `://`.
-        if (code === BACKTICK) return nok(code);
-        if (code === SLASH && last === SLASH && beforeLast === COLON) return nok(code);
-        consume(code);
-        return code === BACKSLASH ? escaped : inside;
-      }
-
-      function escaped(code: Code): State | undefined {
-        if (code === null || isLineEnding(code)) return inside(code);
-        consume(code);
-        // An escaped `\$` neither closes nor extends a dollar run.
-        last = null;
-        return inside;
-      }
-
-      function inside(code: Code): State | undefined {
-        const failedRun = code === DOLLAR && last === DOLLAR;
-        if (
-          code === null ||
-          isLineEnding(code) ||
-          length > MAX_MATH_LENGTH ||
-          (code === delimiter && !failedRun)
-        ) {
-          effects.exit("mathTextData");
-          return between(code);
-        }
-        return dataCharacter(code);
-      }
-
-      function consume(code: Code) {
-        if (!isWhitespace(code) && !isDigit(code) && code !== COMMA) citation = false;
-        effects.consume(code);
-        beforeLast = last;
-        last = code;
-        length++;
-      }
-
-      function after(code: Code): State | undefined {
-        if (closer === RIGHT_BRACKET && citation) return nok(code);
-        effects.exit("mathText");
-        return ok(code);
-      }
-
-      function tokenizeClosing(effects: Effects, ok: State, nok: State): State {
-        let run = 0;
-        return function start(code) {
-          if (length === 0) return nok(code);
-          if (delimiter === DOLLAR && size === 1 && isWhitespace(last)) return nok(code);
-          effects.enter("mathTextSequence");
-          effects.consume(code);
-          if (delimiter === DOLLAR) {
-            run = 1;
-            return dollarRun;
-          }
-          return bracketClose;
-        };
-
-        function dollarRun(code: Code): State | undefined {
-          if (code === DOLLAR) {
-            run++;
-            effects.consume(code);
-            return dollarRun;
-          }
-          if (run !== size || (size === 1 && isDigit(code))) return nok(code);
-          effects.exit("mathTextSequence");
-          return ok(code);
-        }
-
-        function bracketClose(code: Code): State | undefined {
-          if (code !== closer) return nok(code);
-          effects.consume(code);
-          effects.exit("mathTextSequence");
-          return ok;
-        }
-      }
-    },
-  };
+function escaped(source: string, offset: number) {
+  let slashes = 0;
+  while (offset > 0 && source[--offset] === "\\") slashes++;
+  return slashes % 2 === 1;
 }
 
-const FENCES: Partial<Record<number, { open: number[]; close: number[] }>> = {
-  [DOLLAR]: { open: [DOLLAR, DOLLAR], close: [DOLLAR, DOLLAR] },
-  [BACKSLASH]: { open: [BACKSLASH, 91], close: [BACKSLASH, RIGHT_BRACKET] },
-};
-
-/** Consumes `codes` exactly, then continues with `ok`. */
-function sequence(effects: Effects, codes: number[], ok: State, nok: State): State {
-  let index = 0;
-  return function next(code) {
-    if (index === codes.length) return ok(code);
-    if (code !== codes[index]) return nok(code);
-    effects.consume(code);
-    index++;
-    return next;
-  };
-}
-
-/**
- * `$$` or `\[` alone on a line opens a display block that runs to the matching
- * `$$` or `\]` line, like a code fence, so formula lines that start with `-`,
- * `#`, or `1.` stay TeX instead of becoming lists or headings.
- */
-const mathBlock: Construct = {
-  name: "chatMathBlock",
-  concrete: true,
-  tokenize(effects, ok, nok) {
-    const interrupt = this.interrupt;
-    let fence = FENCES[DOLLAR]!;
-    const nonLazyContinuation: Construct = { partial: true, tokenize: tokenizeNonLazy };
-    const closing: Construct = { partial: true, tokenize: tokenizeClosing };
-
-    return function start(code) {
-      const selected = code === null ? undefined : FENCES[code];
-      if (!selected) return nok(code);
-      fence = selected;
-      effects.enter("mathFlow");
-      effects.enter("mathFlowFence");
-      effects.enter("mathFlowFenceSequence");
-      return sequence(effects, fence.open, afterOpening, nok)(code);
-    };
-
-    function afterOpening(code: Code): State | undefined {
-      effects.exit("mathFlowFenceSequence");
-      return openingRest(code);
-    }
-
-    function openingRest(code: Code): State | undefined {
-      // Unlike a code fence, a block needs its closing line, so a formula
-      // still streaming in stays text instead of typesetting each prefix.
-      if (code === null) return nok(code);
-      if (isLineEnding(code)) {
-        effects.exit("mathFlowFence");
-        if (interrupt) return ok(code);
-        return effects.attempt(nonLazyContinuation, lineStart, after)(code);
-      }
-      if (!isWhitespace(code)) return nok(code);
-      effects.consume(code);
-      return openingRest;
-    }
-
-    function lineStart(code: Code): State | undefined {
-      return effects.attempt(closing, after, content)(code);
-    }
-
-    function content(code: Code): State | undefined {
-      if (code === null) return nok(code);
-      if (isLineEnding(code)) return effects.attempt(nonLazyContinuation, lineStart, after)(code);
-      effects.enter("mathFlowValue");
-      return value(code);
-    }
-
-    function value(code: Code): State | undefined {
-      if (code === null || isLineEnding(code)) {
-        effects.exit("mathFlowValue");
-        return content(code);
-      }
-      effects.consume(code);
-      return value;
-    }
-
-    function after(code: Code): State | undefined {
-      effects.exit("mathFlow");
-      return ok(code);
-    }
-
-    function tokenizeClosing(effects: Effects, ok: State, nok: State): State {
-      return function start(code) {
-        effects.enter("mathFlowFence");
-        return indent(code);
-      };
-
-      function indent(code: Code): State | undefined {
-        if (isWhitespace(code) && !isLineEnding(code)) {
-          effects.consume(code);
-          return indent;
-        }
-        effects.enter("mathFlowFenceSequence");
-        return sequence(effects, fence.close, afterSequence, nok)(code);
-      }
-
-      function afterSequence(code: Code): State | undefined {
-        effects.exit("mathFlowFenceSequence");
-        return rest(code);
-      }
-
-      function rest(code: Code): State | undefined {
-        if (code === null || isLineEnding(code)) {
-          effects.exit("mathFlowFence");
-          return ok(code);
-        }
-        if (!isWhitespace(code)) return nok(code);
-        effects.consume(code);
-        return rest;
-      }
-    }
-
-    /** Ends the block at a lazy line, such as one that leaves a blockquote. */
-    function tokenizeNonLazy(this: TokenizeContext, effects: Effects, ok: State, nok: State) {
-      const isLazy = () => this.parser.lazy[this.now().line];
-      return function start(code: Code): State | undefined {
-        if (code === null) return ok(code);
-        effects.enter("lineEnding");
-        effects.consume(code);
-        effects.exit("lineEnding");
-        return (next: Code) => (isLazy() ? nok(next) : ok(next));
-      };
-    }
-  },
-};
-
-export const chatMathSyntax: MicromarkExtension = {
-  flow: { [DOLLAR]: mathBlock, [BACKSLASH]: mathBlock },
-  text: { [DOLLAR]: mathText(DOLLAR), [BACKSLASH]: mathText(BACKSLASH) },
-};
-
-const MATH_DISPLAY = ["language-math", "math-display"];
-const baseFromMarkdown = mathFromMarkdown();
-
-export const chatMathFromMarkdown: FromMarkdownExtension = {
-  ...baseFromMarkdown,
-  exit: {
-    ...baseFromMarkdown.exit,
-    /** Blocks render through the same `code` element as inline math, not a code fence. */
-    mathFlow(this: CompileContext, token: Token) {
-      baseFromMarkdown.exit?.mathFlow?.call(this, token);
-      const parent = this.stack.at(-1);
-      const node = parent && "children" in parent ? parent.children.at(-1) : undefined;
-      if (node?.type !== "math") return;
-      node.data = {
-        hName: "code",
-        hProperties: { className: MATH_DISPLAY },
-        hChildren: [{ type: "text", value: node.value }],
-      };
-    },
-    /** `$$…$$` and `\[…\]` display even when they share a line with prose. */
-    mathTextSequence(this: CompileContext, token: Token) {
-      const sequence = this.sliceSerialize(token);
-      if (sequence !== "$$" && sequence !== "\\[") return;
-      const node = this.stack.at(-2);
-      if (node?.type === "inlineMath" && node.data?.hProperties) {
-        node.data.hProperties.className = MATH_DISPLAY;
-      }
-    },
-  },
-};
-
-/** Parses TeX math in chat markdown. Rendered by `MarkdownMath` from `code.math-*` elements. */
-export const remarkChatMath: Plugin<[], Root> = function () {
-  const data = this.data();
-  (data.micromarkExtensions ??= []).push(chatMathSyntax);
-  (data.fromMarkdownExtensions ??= []).push(chatMathFromMarkdown);
-  const parse = this.parser as Parser<Root> | undefined;
-  if (parse) {
-    this.parser = (source, file) => {
-      const { value, pipe } = protectMathPipes(source);
-      const tree = parse(value, file);
-      restoreMathPipes(tree, pipe);
-      return tree;
-    };
-  }
-};
-
-/** Protect only parser-owned formula pipes before GFM divides table cells. Each
- * replacement is one UTF-16 unit, so task toggles and file links keep their offsets. */
-function protectMathPipes(source: string) {
-  if (!source.includes("|") || !mayContainMath(source)) return { value: source, pipe: null };
-  let code = 0xe000;
-  while (code <= 0xf8ff && source.includes(String.fromCharCode(code))) code++;
-  if (code > 0xf8ff) return { value: source, pipe: null };
-  const pipe = String.fromCharCode(code);
-  const tree = fromMarkdown(source, {
-    extensions: [chatMathSyntax],
-    mdastExtensions: [chatMathFromMarkdown],
-  });
-  const replacements: Array<{ start: number; end: number }> = [];
-  const visit = (node: Root | Root["children"][number]) => {
-    if (node.type === "math" || node.type === "inlineMath") {
+/** Translate chat delimiters to remark-math's dollar syntax. Replacements keep
+ * their UTF-16 lengths so task markers, citations and editor ranges keep offsets. */
+function normalizeMath(source: string) {
+  let marker = 0xe000;
+  while (source.includes(String.fromCharCode(marker))) marker++;
+  const padding = String.fromCharCode(marker++);
+  while (source.includes(String.fromCharCode(marker))) marker++;
+  const dollar = String.fromCharCode(marker++);
+  while (source.includes(String.fromCharCode(marker))) marker++;
+  const pipe = String.fromCharCode(marker++);
+  while (source.includes(String.fromCharCode(marker))) marker++;
+  const newline = String.fromCharCode(marker++);
+  while (source.includes(String.fromCharCode(marker))) marker++;
+  const carriage = String.fromCharCode(marker);
+  const chars = source.split("");
+  const ignored: Array<{ start: number; end: number }> = [];
+  const visit = (node: Root | RootContent) => {
+    if (
+      [
+        "code",
+        "inlineCode",
+        "html",
+        "link",
+        "image",
+        "definition",
+        "linkReference",
+        "imageReference",
+      ].includes(node.type)
+    ) {
       const start = node.position?.start.offset;
       const end = node.position?.end.offset;
-      if (start === undefined || end === undefined) return;
-      const authored = source.slice(start, end);
-      // A GFM cell cannot span rows. A prepass formula crossing a line ending
-      // must not hide the table's separators, even if it closes in a later row.
-      if (node.type === "inlineMath" && /[\r\n]/.test(authored)) return;
-      if (authored.includes("|")) {
-        replacements.push({ start, end });
-      }
+      if (start !== undefined && end !== undefined) ignored.push({ start, end });
     } else if ("children" in node) node.children.forEach(visit);
   };
-  visit(tree);
-  if (replacements.length === 0) return { value: source, pipe: null };
-  let value = "";
-  let offset = 0;
-  for (const range of replacements) {
-    value += source.slice(offset, range.start);
-    value += source.slice(range.start, range.end).replaceAll("|", pipe);
-    offset = range.end;
+  if (/[`~[<]/.test(source)) visit(proseParser.parse(source));
+  const overlaps = (start: number, end: number) =>
+    ignored.some((range) => start < range.end && end > range.start);
+  const ranges = new Map<number, { end: number; display: boolean }>();
+  const openings = /\\[([]|\${1,2}/g;
+  for (let match; (match = openings.exec(source));) {
+    const start = match.index;
+    const open = match[0];
+    if (escaped(source, start)) {
+      openings.lastIndex = start + 1;
+      continue;
+    }
+    if (overlaps(start, start + open.length)) continue;
+    if (
+      open[0] === "$" &&
+      ((source[start - 1] === "$" && !escaped(source, start - 1)) ||
+        source[start + open.length] === "$")
+    )
+      continue;
+    const close = open === "\\(" ? "\\)" : open === "\\[" ? "\\]" : open;
+    const limit = start + MAX_MATH_LENGTH + open.length + close.length;
+    const bounded = source.slice(start, limit);
+    let end = bounded.indexOf(close, open.length);
+    if (end !== -1) end += start;
+    while (
+      end !== -1 &&
+      end - start <= MAX_MATH_LENGTH &&
+      (escaped(source, end) || (open[0] === "$" && source[end + close.length] === "$"))
+    ) {
+      const next = bounded.indexOf(close, end - start + close.length);
+      end = next === -1 ? -1 : next + start;
+    }
+    if (end === -1 || end - start > MAX_MATH_LENGTH) continue;
+    const body = source.slice(start + open.length, end);
+    if (!body) continue;
+    if (open === "$" && (/^\s|\s$|[\r\n]/.test(body) || /\d/.test(source[end + 1] ?? ""))) continue;
+    if (open === "\\[" && /^[\d,\s]+$/.test(body)) continue;
+    const lineStart = source.lastIndexOf("\n", start - 1) + 1;
+    // GFM cells cannot continue into the next row.
+    if (/[\r\n]/.test(body) && source.slice(lineStart, start).includes("|")) continue;
+    const display = open === "$$" || open === "\\[";
+    const block =
+      display &&
+      /^[ \t]*\r?\n/.test(body) &&
+      /^[ \t>]*$/.test(source.slice(source.lastIndexOf("\n", end - 1) + 1, end));
+    if (!block && (/`|:\/\//.test(body) || overlaps(start, end + close.length))) continue;
+    const normalizedOpen = block ? "$$" : "$" + padding.repeat(open.length - 1);
+    const normalizedClose = block ? "$$" : padding.repeat(close.length - 1) + "$";
+    for (let index = 0; index < open.length; index++) chars[start + index] = normalizedOpen[index]!;
+    for (let index = 0; index < close.length; index++) chars[end + index] = normalizedClose[index]!;
+    for (let index = start + open.length; index < end; index++) {
+      if (source[index] === "|") chars[index] = pipe;
+      else if (source[index] === "$") chars[index] = dollar;
+      else if (!block && source[index] === "\n") chars[index] = newline;
+      else if (!block && source[index] === "\r") chars[index] = carriage;
+    }
+    ranges.set(start, { end: end + close.length, display });
+    openings.lastIndex = end + close.length;
   }
-  return { value: value + source.slice(offset), pipe };
-}
-
-function restoreMathPipes(tree: Root, pipe: string | null) {
-  const visit = (node: Root | Root["children"][number], inTable: boolean) => {
+  // Unmatched, escaped and currency dollars must remain prose with single-dollar math enabled.
+  for (let index = 0; index < chars.length; index++) {
+    const range = ranges.get(index);
+    if (range) {
+      index = range.end - 1;
+      continue;
+    }
+    if (source[index] === "$" && !escaped(source, index) && !overlaps(index, index + 1))
+      chars[index] = dollar;
+  }
+  const decode = (value: string) =>
+    value
+      .replaceAll(padding, "")
+      .replaceAll(dollar, "$")
+      .replaceAll(pipe, "|")
+      .replaceAll(newline, "\n")
+      .replaceAll(carriage, "\r");
+  const lines = [0];
+  for (const match of source.matchAll(/\r\n|\r|\n/g)) lines.push(match.index + match[0].length);
+  const restore = (node: Root | RootContent, inTable = false) => {
     const table = inTable || node.type === "tableCell";
-    // GFM may reinterpret a protected range. Never expose its placeholder as text.
-    if (pipe && "value" in node) node.value = node.value.replaceAll(pipe, "|");
+    if ("value" in node) node.value = decode(node.value);
+    if (node.position)
+      for (const point of [node.position.start, node.position.end]) {
+        if (point.offset === undefined) continue;
+        let low = 0;
+        let high = lines.length;
+        while (low + 1 < high) {
+          const middle = (low + high) >>> 1;
+          if (lines[middle]! <= point.offset) low = middle;
+          else high = middle;
+        }
+        point.line = low + 1;
+        point.column = point.offset - lines[low]! + 1;
+      }
     if (node.type === "math" || node.type === "inlineMath") {
-      // GFM consumes one escaping backslash before a table pipe, including
-      // inside code spans. TeX row separators before that escape stay intact.
-      if (table) {
+      if (table)
         node.value = node.value.replace(/(\\+)\|/g, (match, slashes: string) =>
           slashes.length % 2 === 1 ? `${slashes.slice(1)}|` : match,
         );
-      }
-      if (node.data) node.data.hChildren = [{ type: "text", value: node.value }];
-    } else if ("children" in node) node.children.forEach((child) => visit(child, table));
+      const display =
+        ranges.get(node.position?.start.offset ?? -1)?.display ?? node.type === "math";
+      node.data = {
+        hName: "code",
+        hProperties: { className: ["language-math", display ? "math-display" : "math-inline"] },
+        hChildren: [{ type: "text", value: node.value }],
+      };
+    } else if ("children" in node) node.children.forEach((child) => restore(child, table));
   };
-  visit(tree, false);
+  return { value: chars.join(""), restore };
 }
+
+/** remark-math owns tokenization; this adapter preserves chat syntax and authored offsets. */
+export const remarkChatMath: Plugin<[], Root> = function () {
+  remarkMath.call(this, { singleDollarTextMath: true });
+  const parse = this.parser as Parser<Root> | undefined;
+  if (parse)
+    this.parser = (source, file) => {
+      const normalized = normalizeMath(source);
+      const tree = parse(normalized.value, file);
+      normalized.restore(tree);
+      return tree;
+    };
+};
 
 const mathParser = unified().use(remarkParse).use(remarkGfm).use(remarkChatMath).freeze();
 

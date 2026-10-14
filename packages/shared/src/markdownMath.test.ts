@@ -1,16 +1,10 @@
 import type { Nodes } from "mdast";
-import { fromMarkdown } from "mdast-util-from-markdown";
 import { describe, expect, it } from "vite-plus/test";
 
-import { chatMathFromMarkdown, chatMathSyntax, mathKind } from "./markdownMath.ts";
+import { mathKind } from "./markdownMath.ts";
 import { markdownMathRanges, parseMarkdownWithMath } from "./markdownMath.ts";
 
-function parse(markdown: string) {
-  return fromMarkdown(markdown, {
-    extensions: [chatMathSyntax],
-    mdastExtensions: [chatMathFromMarkdown],
-  });
-}
+const parse = parseMarkdownWithMath;
 
 function collect(node: Nodes, out: Nodes[] = []): Nodes[] {
   out.push(node);
@@ -137,6 +131,25 @@ describe("chat math parsing", () => {
       ["listItem", markdown.indexOf("- [x]")],
       ["inlineMath", markdown.indexOf("$y$")],
     ]);
+  });
+
+  it.each(["\n", "\r\n", "\r"])("keeps authored lines and UTF-16 offsets with %j", (eol) => {
+    const source = `😀 \\(x${eol}+y\\)${eol}${eol}- [ ] check $z$`;
+    const nodes = collect(parse(source));
+    const formula = nodes.find(
+      (node) => node.type === "inlineMath" && node.value === "x" + eol + "+y",
+    );
+    expect(formula?.position?.start).toEqual({ line: 1, column: 4, offset: 3 });
+    expect(formula?.position?.end).toEqual({
+      line: 2,
+      column: 5,
+      offset: source.indexOf(eol + eol),
+    });
+    expect(nodes.find((node) => node.type === "listItem")?.position?.start).toEqual({
+      line: 4,
+      column: 1,
+      offset: source.indexOf("- [ ]"),
+    });
   });
 
   it("shows unfinished formulas as text while a response streams", () => {
