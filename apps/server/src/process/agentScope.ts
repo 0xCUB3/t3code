@@ -225,6 +225,12 @@ export const make = Effect.gen(function* () {
         systemctl,
         runtimeDir,
         scopeOptions,
+        // A shared server keeps serving its other threads when the kernel
+        // kills one of its tools, so its scope keeps running instead.
+        sharedScopeOptions:
+          scopeOptions === oomOptions
+            ? [...stopOptions, "--property=OOMPolicy=continue"]
+            : scopeOptions,
       };
     }),
   );
@@ -349,6 +355,7 @@ export const make = Effect.gen(function* () {
       threadId,
       env,
       survivesRestart,
+      shared,
     }) {
       const resolved = yield* resolve(command, env ?? hostEnvironment);
       // Leave unresolved commands alone so the spawn reports the missing binary.
@@ -357,6 +364,7 @@ export const make = Effect.gen(function* () {
       if (scope === undefined) return agentScopeCommand({ command: resolved, args });
       const unit = `t3code-${name}-${NodeCrypto.randomUUID().slice(0, 8)}.scope`;
       if (threadId !== undefined) yield* track(scope.systemctl, threadId, unit);
+      const options = shared === true ? scope.sharedScopeOptions : scope.scopeOptions;
       const systemdScope: AgentSystemdScope = {
         systemdRun: scope.systemdRun,
         runtimeDir: scope.runtimeDir,
@@ -364,7 +372,7 @@ export const make = Effect.gen(function* () {
         unit,
         // Without a thread nothing reads the result, so let systemd unload
         // the unit even when it fails.
-        options: threadId === undefined ? [...scope.scopeOptions, "--collect"] : scope.scopeOptions,
+        options: threadId === undefined ? [...options, "--collect"] : options,
       };
       return agentScopeCommand({ command: resolved, args, scope: systemdScope });
     }),
