@@ -37,6 +37,12 @@ const MAX_UPSTREAM_RESPONSE_BYTES = 64 * 1024;
  * enough for the current iOS and Android bundles.
  */
 const SOURCE_MAP_CACHE_CAPACITY = 2;
+/**
+ * About twice a stripped production map today. A larger object, such as one
+ * written with a leaked upload token, is skipped unread rather than decoded
+ * past the isolate's memory.
+ */
+export const MAX_SOURCE_MAP_BYTES = 16 * 1024 * 1024;
 /** A map can land in R2 a moment after its update ships, so a miss is retried. */
 const MISSING_SOURCE_MAP_TTL = Duration.minutes(5);
 const FAILED_SOURCE_MAP_TTL = Duration.seconds(30);
@@ -76,6 +82,12 @@ export class SourceMapObjectError extends Schema.TaggedError<SourceMapObjectErro
   { key: Schema.String, cause: Schema.Defect() },
 ) {}
 
+/** An object in the source maps bucket, read only once its size is known to fit. */
+export interface StoredSourceMap {
+  readonly size: number;
+  readonly text: Effect.Effect<string, SourceMapObjectError>;
+}
+
 export interface FoundSourceMap {
   readonly key: string;
   readonly map: CompactSourceMap;
@@ -96,7 +108,7 @@ export class SourceMaps extends Context.Service<
  * `get` answers undefined when nothing is stored under a key.
  */
 export const makeSourceMaps = (
-  get: (key: string) => Effect.Effect<string | undefined, SourceMapObjectError>,
+  get: (key: string) => Effect.Effect<StoredSourceMap | undefined, SourceMapObjectError>,
 ) =>
   Effect.gen(function* () {
     // Keyed by the candidate keys for one bundle, so a launch that only has a
@@ -105,9 +117,16 @@ export const makeSourceMaps = (
       (candidates: string) =>
         Effect.gen(function* () {
           for (const key of candidates.split("|")) {
-            const text = yield* get(key);
-            if (text === undefined) continue;
-            const map = decodeSourceMap(parseJson(text));
+            const stored = yield* get(key);
+            if (stored === undefined) continue;
+            if (stored.size > MAX_SOURCE_MAP_BYTES) {
+              yield* Effect.logWarning("Stored mobile source map is too large", {
+                key,
+                size: stored.size,
+              });
+              continue;
+            }
+            const map = decodeSourceMap(parseJson(yield* stored.text));
             if (map) return { key, map } satisfies FoundSourceMap;
             yield* Effect.logWarning("Stored mobile source map could not be decoded", { key });
           }

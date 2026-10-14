@@ -361,7 +361,19 @@ export const layer = Api.make(
     // Built here, once per isolate, so decoded maps outlive a request.
     const mobileSourceMapLookups = yield* MobileTelemetry.makeSourceMaps((key) =>
       mobileSourceMaps.get(key).pipe(
-        Effect.flatMap((object) => (object === null ? Effect.undefined : object.text())),
+        Effect.map((object) =>
+          object === null
+            ? undefined
+            : {
+                size: object.size,
+                text: object.text().pipe(
+                  Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext),
+                  Effect.mapError(
+                    (cause) => new MobileTelemetry.SourceMapObjectError({ key, cause }),
+                  ),
+                ),
+              },
+        ),
         Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext),
         Effect.mapError((cause) => new MobileTelemetry.SourceMapObjectError({ key, cause })),
       ),

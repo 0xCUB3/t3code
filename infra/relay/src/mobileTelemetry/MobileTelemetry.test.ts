@@ -41,7 +41,7 @@ interface Harness {
   readonly execute?: (
     request: HttpClientRequest.HttpClientRequest,
   ) => Effect.Effect<HttpClientResponse.HttpClientResponse, HttpClientError.HttpClientError>;
-  readonly objects?: Readonly<Record<string, string>>;
+  readonly objects?: Readonly<Record<string, string | { readonly size: number }>>;
   readonly allow?: boolean;
 }
 
@@ -60,8 +60,17 @@ const makeHarness = Effect.fnUntraced(function* (options: Harness = {}) {
   // One per harness, as the Worker builds one per isolate.
   const sourceMaps = yield* MobileTelemetry.makeSourceMaps((key) =>
     Effect.sync(() => {
-      objectReads.push(key);
-      return options.objects?.[key];
+      const object = options.objects?.[key];
+      if (object === undefined) return undefined;
+      return typeof object === "string"
+        ? {
+            size: object.length,
+            text: Effect.sync(() => {
+              objectReads.push(key);
+              return object;
+            }),
+          }
+        : { size: object.size, text: Effect.die("read an object too large to decode") };
     }),
   );
   const layerTelemetry = MobileTelemetry.layer.pipe(
@@ -213,6 +222,23 @@ describe("MobileTelemetry", () => {
       const harness = yield* makeHarness();
       const stack = "Error: x\n    at render (address at index.android.bundle:1:12)";
       yield* harness.send(ingest("logs", exceptionLogs(stack)));
+      expect(forwardedStack(harness.sent[0]!)).toMatchObject({
+        "exception.stacktrace": stack,
+        "relay.symbolication.status": "source_map_missing",
+      });
+    }),
+  );
+
+  it.effect("skips a stored map too large to decode, without reading it", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({
+        objects: {
+          [`android/ota/${UPDATE_ID}.map`]: { size: MobileTelemetry.MAX_SOURCE_MAP_BYTES + 1 },
+        },
+      });
+      const stack = "Error: x\n    at render (address at index.android.bundle:1:12)";
+      const response = yield* harness.send(ingest("logs", exceptionLogs(stack)));
+      expect(response.status).toBe(200);
       expect(forwardedStack(harness.sent[0]!)).toMatchObject({
         "exception.stacktrace": stack,
         "relay.symbolication.status": "source_map_missing",

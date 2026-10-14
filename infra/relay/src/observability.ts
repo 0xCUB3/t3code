@@ -1,3 +1,6 @@
+// @effect-diagnostics nodeBuiltinImport:off - one sha256 inside a synchronous Output.map.
+import * as NodeCrypto from "node:crypto";
+
 import * as Alchemy from "alchemy";
 import * as Axiom from "alchemy/Axiom";
 import * as Cloudflare from "alchemy/Cloudflare";
@@ -6,6 +9,7 @@ import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
+import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as Tracer from "effect/Tracer";
 
@@ -85,7 +89,7 @@ export const RelayObservability = Effect.gen(function* () {
 
   // Mobile JavaScript source maps, read by the relay to symbolicate stacks.
   const mobileSourceMaps = yield* Cloudflare.R2.Bucket("MobileSourceMapsBucket", {
-    name: relayResourceNameForStage("t3-code-mobile-sourcemaps", stage),
+    name: mobileSourceMapsBucketName(stage),
   });
 
   yield* Axiom.View("RelayRecentSpansView", {
@@ -105,6 +109,45 @@ export const RelayObservability = Effect.gen(function* () {
     mobileTelemetryIngestToken,
     mobileSourceMaps,
   } as const;
+});
+
+const mobileSourceMapsBucketName = (stage: string) =>
+  relayResourceNameForStage("t3-code-mobile-sourcemaps", stage);
+
+/**
+ * S3 credentials that can only write objects to the source maps bucket, for
+ * the `MOBILE_SOURCEMAPS_R2` secret CI and EAS Build upload maps with. One
+ * JSON value so it is one secret to copy. R2 derives S3 credentials from an
+ * API token: the access key id is the token id, the secret the SHA-256 of
+ * the token value. Deploy-time only; the Worker reads the bucket through its
+ * own binding.
+ */
+export const MobileSourceMapsUploadCredentials = Effect.gen(function* () {
+  const { stage } = yield* Alchemy.Stack;
+  const { accountId } = yield* yield* Cloudflare.CloudflareEnvironment;
+  const bucketName = mobileSourceMapsBucketName(stage);
+  const token = yield* Cloudflare.ApiToken.AccountApiToken("MobileSourceMapsUploadToken", {
+    name: relayResourceNameForStage("t3-code-mobile-sourcemaps-upload", stage),
+    policies: [
+      {
+        effect: "allow",
+        permissionGroups: ["Workers R2 Storage Bucket Item Write"],
+        resources: { [`com.cloudflare.edge.r2.bucket.${accountId}_default_${bucketName}`]: "*" },
+      },
+    ],
+  });
+  return Output.map(Output.all(token.tokenId, token.value), ([tokenId, value]) =>
+    Redacted.make(
+      JSON.stringify({
+        endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+        bucketName,
+        accessKeyId: tokenId,
+        secretAccessKey: NodeCrypto.createHash("sha256")
+          .update(Redacted.value(value))
+          .digest("hex"),
+      }),
+    ),
+  );
 });
 
 export const withSpanAttributes =

@@ -18,7 +18,7 @@ export interface SourceMapUpload {
   readonly path: string;
 }
 
-/** The `MOBILE_SOURCEMAPS_R2` secret; see docs/operations/relay-observability.md. */
+/** The `MOBILE_SOURCEMAPS_R2` secret: the relay stack's `mobileSourceMapsUploadCredentials`. */
 export interface UploadCredentials {
   readonly endpoint: string;
   readonly bucketName: string;

@@ -138,22 +138,19 @@ Maps are keyed by the bundle that crashed: `<platform>/ota/<updateId>.map` for O
 `<platform>/build/<easBuildId>.map` for the bundle embedded in a store build. The production
 mobile workflow uploads OTA maps after `eas update`, and the `eas-build-on-success` hook in
 `apps/mobile/package.json` uploads a build's map, both with `apps/mobile/scripts/upload-sourcemaps.mts`.
-They need the `MOBILE_SOURCEMAPS_R2` secret. Create an R2 API token in the Cloudflare dashboard
-(R2, Manage API tokens) with **Object Read & Write** applied only to `t3-code-mobile-sourcemaps-prod`,
-then store its S3 credentials as one JSON value:
+They need the `MOBILE_SOURCEMAPS_R2` secret, a JSON value the stack outputs as
+`mobileSourceMapsUploadCredentials` from a token that can only write to the bucket. Creating that
+token needs **Account API Tokens: Edit** on the deploy token. Deploy output shows it redacted; read
+it from state, where it is under `__redacted__`:
 
-```json
-{
-  "endpoint": "https://<account-id>.r2.cloudflarestorage.com",
-  "bucketName": "t3-code-mobile-sourcemaps-prod",
-  "accessKeyId": "<Access Key ID>",
-  "secretAccessKey": "<Secret Access Key>"
-}
+```sh
+cd infra/relay && vp exec alchemy state read T3CodeRelay/prod/output
 ```
 
 Set it as a GitHub Actions secret, for OTA updates, and as an EAS environment variable with
-`secret` visibility in the `production` and `preview` environments, for builds. Rotating the token
-means updating both.
+`secret` visibility in the `production` environment only, for builds. Keep it out of `preview`:
+PR preview builds run the PR's code in that environment. In CI only the upload step gets it, not
+`eas update` and the dependencies it runs. If the deploy replaces the token, update both.
 
 Without it, uploads are skipped with a warning and stacks stay minified. Each ingest request is one
 `relay.mobile_telemetry.ingest` span; `relay.mobile_telemetry.outcome` is `forwarded`,
