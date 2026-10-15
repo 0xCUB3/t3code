@@ -39,3 +39,5 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+# Gradle and native outputs parked by scripts/mobile-native-client.ts during prebuild
+/.android-cache
