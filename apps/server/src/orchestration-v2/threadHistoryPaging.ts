@@ -83,26 +83,25 @@ function bytesOfJson(value: unknown): number {
   return Buffer.byteLength(JSON.stringify(value), "utf8");
 }
 
+/**
+ * Proves overflow without serializing: a string's UTF-16 length never exceeds
+ * its UTF-8 JSON bytes, and local items are encoded once per array they sit in.
+ */
 function timelineTextExceedsBudget(
   projection: OrchestrationV2ThreadProjection,
   budget: number,
 ): boolean {
-  // JSON UTF-8 encoding cannot use fewer bytes than a string's UTF-16 length.
-  // Count both copies of local items, just as they appear in the projection.
   let length = 0;
-  for (const row of projection.visibleTurnItems) {
-    if ("text" in row.item && typeof row.item.text === "string") {
-      length += row.item.text.length;
-      if (length > budget) return true;
-    }
-  }
-  for (const item of projection.turnItems) {
-    if ("text" in item && typeof item.text === "string") {
+  const exceeds = (item: OrchestrationV2TurnItem): boolean => {
+    if ("text" in item) {
       length += item.text.length;
-      if (length > budget) return true;
     }
-  }
-  return false;
+    return length > budget;
+  };
+  return (
+    projection.visibleTurnItems.some((row) => exceeds(row.item)) ||
+    projection.turnItems.some(exceeds)
+  );
 }
 
 /** Ordinary history-page cost: one projected row (item is nested once). */
