@@ -64,8 +64,10 @@ function ConfiguredConnectOnboardingDialog() {
 
   const { environments, isReady: environmentsReady } = useEnvironments();
   // With no computers in this browser, the hosted home screen adds the
-  // account's computers after sign-in, so this wizard would repeat it.
-  const homeScreenAddsComputers = isHostedStaticApp() && environments.length === 0;
+  // account's computers after sign-in, so this wizard would repeat it. An
+  // unloaded catalog is not known to be empty, so the wizard still opens.
+  const homeScreenAddsComputers =
+    isHostedStaticApp() && environmentsReady && environments.length === 0;
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const primarySessionState = useAtomValue(
     primaryEnvironmentId === null
