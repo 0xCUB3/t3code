@@ -5669,7 +5669,10 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
       const parentId = ThreadId.make("thread:filled-fork:parent");
       const forkId = ThreadId.make("thread:filled-fork:fork");
       const parentText = "parent prompt";
-      const createThread = (threadId: ThreadId, forkedFromRunId: RunId | null) =>
+      const createThread = (
+        threadId: ThreadId,
+        forkedFrom: { readonly threadId: ThreadId; readonly runId: RunId } | null,
+      ) =>
         store.apply({
           id: EventId.make(`event:${threadId}`),
           type: "thread.created",
@@ -5689,14 +5692,11 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
             worktreePath: null,
             activeProviderThreadId: null,
             lineage: {
-              parentThreadId: forkedFromRunId === null ? null : parentId,
-              relationshipToParent: forkedFromRunId === null ? null : "fork",
+              parentThreadId: forkedFrom?.threadId ?? null,
+              relationshipToParent: forkedFrom === null ? null : "fork",
               rootThreadId: parentId,
             },
-            forkedFrom:
-              forkedFromRunId === null
-                ? null
-                : { type: "run", threadId: parentId, runId: forkedFromRunId },
+            forkedFrom: forkedFrom === null ? null : { type: "run", ...forkedFrom },
             createdAt: now,
             updatedAt: now,
             archivedAt: null,
@@ -5778,13 +5778,13 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
       };
       // The initial window must be the tail of the full timeline, with the same
       // positions, and bound to the same first page and cursor.
-      const readFirstPage = Effect.fnUntraced(function* () {
-        const full = (yield* store.getThreadSnapshot(forkId)).projection;
+      const readFirstPage = Effect.fnUntraced(function* (threadId: ThreadId) {
+        const full = (yield* store.getThreadSnapshot(threadId)).projection;
         const { window, parsedParent } = yield* Effect.acquireUseRelease(
           Effect.sync(() => vi.spyOn(JSON, "parse")),
           (parse) =>
             store
-              .getThreadSnapshotWindow(forkId, {
+              .getThreadSnapshotWindow(threadId, {
                 rowLimit: THREAD_HISTORY_SNAPSHOT_ROW_LIMIT,
                 userTurnLimit: THREAD_HISTORY_PAGE_POLICY.maxUserTurns,
               })
@@ -5806,12 +5806,12 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
       yield* createThread(parentId, null);
       for (const turn of [1, 2, 3]) yield* addTurn(parentId, turn, parentText);
       // The parent kept going after the fork, so its third turn is not inherited.
-      yield* createThread(forkId, RunId.make(`run:${parentId}:2`));
+      yield* createThread(forkId, { threadId: parentId, runId: RunId.make(`run:${parentId}:2`) });
       for (let turn = 1; turn <= 9; turn += 1) yield* addTurn(forkId, turn, "fork prompt");
 
       // Nine local turns leave room for the parent's last inherited turn, so
       // the window still reads parent bodies.
-      const partial = yield* readFirstPage();
+      const partial = yield* readFirstPage(forkId);
       assert.include(
         partial.page.items.map((row) => row.visibility),
         "inherited",
@@ -5821,9 +5821,18 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
       // Ten local turns fill the page: parent rows only shift positions and
       // the cursor, so their bodies are not read.
       yield* addTurn(forkId, 10, "fork prompt");
-      const filled = yield* readFirstPage();
+      const filled = yield* readFirstPage(forkId);
       assert.isNotNull(filled.page.historyCursor);
       assert.isFalse(filled.parsedParent);
+
+      // A fork of the fork inherits the grandparent's rows through its parent,
+      // and its parent's own ten turns fill a page too. Counting rows at either
+      // level would misplace the page, so a nested fork keeps the full read.
+      const nestedId = ThreadId.make("thread:filled-fork:nested");
+      yield* createThread(nestedId, { threadId: forkId, runId: RunId.make(`run:${forkId}:10`) });
+      for (let turn = 1; turn <= 10; turn += 1) yield* addTurn(nestedId, turn, "nested prompt");
+      const nested = yield* readFirstPage(nestedId);
+      assert.isTrue(nested.parsedParent);
     }),
   );
 
