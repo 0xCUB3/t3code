@@ -9,6 +9,7 @@ import {
   MessageId,
   type ModelSelection,
   type OrchestrationV2ProviderThread,
+  type OrchestrationV2ThreadProjection,
   type OrchestrationV2ThreadShellSnapshot,
   NodeId,
   ProjectId,
@@ -40,6 +41,7 @@ import {
   decodeThreadHistoryCursor,
   selectHistoryPageFromCursor,
   THREAD_HISTORY_PAGE_POLICY,
+  THREAD_HISTORY_SNAPSHOT_ROW_LIMIT,
 } from "./threadHistoryPaging.ts";
 
 const layerTest = Layer.mergeAll(
@@ -5660,18 +5662,15 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
     }),
   );
 
-  it.effect("preserves the cursor when local turns fill a fork snapshot", () =>
+  it.effect("skips parent bodies once a fork's own turns fill its first page", () =>
     Effect.gen(function* () {
       const store = yield* ProjectionStore.ProjectionStoreV2;
-      const sql = yield* SqlClient.SqlClient;
       const now = DateTime.makeUnsafe("2026-10-01T00:00:00.000Z");
-      const parentId = ThreadId.make("thread:counted-fork:parent");
-      const childId = ThreadId.make("thread:counted-fork:child");
-      const parentRunId = RunId.make("run:counted-fork:parent");
-      for (const threadId of [parentId, childId]) {
-        const runId = threadId === parentId ? parentRunId : RunId.make("run:counted-fork:child");
-        const nodeId = NodeId.make(`node:${threadId}`);
-        yield* store.apply({
+      const parentId = ThreadId.make("thread:filled-fork:parent");
+      const forkId = ThreadId.make("thread:filled-fork:fork");
+      const parentText = "parent prompt";
+      const createThread = (threadId: ThreadId, forkedFromRunId: RunId | null) =>
+        store.apply({
           id: EventId.make(`event:${threadId}`),
           type: "thread.created",
           threadId,
@@ -5680,8 +5679,8 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
             createdBy: "user",
             creationSource: "web",
             id: threadId,
-            projectId: ProjectId.make("project:counted-fork"),
-            title: "Counted fork",
+            projectId: ProjectId.make("project:filled-fork"),
+            title: "Filled fork",
             providerInstanceId,
             modelSelection,
             runtimeMode: "full-access",
@@ -5690,14 +5689,14 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
             worktreePath: null,
             activeProviderThreadId: null,
             lineage: {
-              parentThreadId: threadId === parentId ? null : parentId,
-              relationshipToParent: threadId === parentId ? null : "fork",
+              parentThreadId: forkedFromRunId === null ? null : parentId,
+              relationshipToParent: forkedFromRunId === null ? null : "fork",
               rootThreadId: parentId,
             },
             forkedFrom:
-              threadId === parentId
+              forkedFromRunId === null
                 ? null
-                : { type: "run", threadId: parentId, runId: parentRunId },
+                : { type: "run", threadId: parentId, runId: forkedFromRunId },
             createdAt: now,
             updatedAt: now,
             archivedAt: null,
@@ -5707,6 +5706,10 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
             deletedAt: null,
           },
         });
+      // Each turn is one run with one user prompt.
+      const addTurn = Effect.fnUntraced(function* (threadId: ThreadId, turn: number, text: string) {
+        const runId = RunId.make(`run:${threadId}:${turn}`);
+        const nodeId = NodeId.make(`node:${threadId}:${turn}`);
         yield* store.apply({
           id: EventId.make(`event:${runId}`),
           type: "run.created",
@@ -5718,7 +5721,7 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
           payload: {
             id: runId,
             threadId,
-            ordinal: 1,
+            ordinal: turn,
             providerInstanceId,
             modelSelection,
             providerThreadId: null,
@@ -5733,66 +5736,94 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
             contextHandoffId: null,
           },
         });
-        const turns = threadId === parentId ? 4 : 12;
-        for (let ordinal = 0; ordinal < turns; ordinal++) {
-          yield* store.apply({
-            id: EventId.make(`event:${threadId}:${ordinal}`),
-            type: "turn-item.updated",
+        yield* store.apply({
+          id: EventId.make(`event:${runId}:prompt`),
+          type: "turn-item.updated",
+          threadId,
+          runId,
+          driver,
+          occurredAt: now,
+          payload: {
+            id: TurnItemId.make(`item:${runId}`),
             threadId,
             runId,
-            driver,
-            occurredAt: now,
-            payload: {
-              id: TurnItemId.make(`item:${threadId}:${ordinal}`),
-              threadId,
-              runId,
-              nodeId: null,
-              providerThreadId: null,
-              providerTurnId: null,
-              nativeItemRef: null,
-              parentItemId: null,
-              ordinal,
-              status: "completed",
-              title: null,
-              startedAt: now,
-              completedAt: now,
-              updatedAt: now,
-              type: "user_message",
-              messageId: MessageId.make(`message:${threadId}:${ordinal}`),
-              inputIntent: "turn_start",
-              createdBy: "user",
-              creationSource: "web",
-              text: `Turn ${ordinal}`,
-              attachments: [],
-            },
-          });
-        }
-      }
-      // A fork keeps its inherited prefix even after its source run rolls back.
-      yield* sql`UPDATE orchestration_v2_projection_runs
-        SET status = 'rolled_back', payload_json = json_set(payload_json, '$.status', 'rolled_back')
-        WHERE run_id = ${parentRunId}`;
-      const full = yield* store.getThreadSnapshot(childId);
-      const expected = buildBoundedThreadProjection({
-        projection: full.projection,
-        snapshotSequence: full.snapshotSequence,
+            nodeId: null,
+            providerThreadId: null,
+            providerTurnId: null,
+            nativeItemRef: null,
+            parentItemId: null,
+            ordinal: turn,
+            status: "completed",
+            title: null,
+            startedAt: now,
+            completedAt: now,
+            updatedAt: now,
+            type: "user_message",
+            messageId: MessageId.make(`message:${runId}`),
+            inputIntent: "turn_start",
+            createdBy: "user",
+            creationSource: "web",
+            text,
+            attachments: [],
+          },
+        });
       });
-      const snapshot = yield* store.getThreadSnapshotWindow(childId, {
-        rowLimit: 77,
-        userTurnLimit: 10,
+      const firstPage = (projection: OrchestrationV2ThreadProjection) => {
+        const bounded = buildBoundedThreadProjection({ projection, snapshotSequence: 0 });
+        return {
+          items: bounded.projection.visibleTurnItems,
+          historyCursor: bounded.historyCursor,
+          hasMoreHistory: bounded.hasMoreHistory,
+        };
+      };
+      // The initial window must be the tail of the full timeline, with the same
+      // positions, and bound to the same first page and cursor.
+      const readFirstPage = Effect.fnUntraced(function* () {
+        const full = (yield* store.getThreadSnapshot(forkId)).projection;
+        const { window, parsedParent } = yield* Effect.acquireUseRelease(
+          Effect.sync(() => vi.spyOn(JSON, "parse")),
+          (parse) =>
+            store
+              .getThreadSnapshotWindow(forkId, {
+                rowLimit: THREAD_HISTORY_SNAPSHOT_ROW_LIMIT,
+                userTurnLimit: THREAD_HISTORY_PAGE_POLICY.maxUserTurns,
+              })
+              .pipe(
+                Effect.map(({ projection }) => ({
+                  window: projection,
+                  parsedParent: parse.mock.calls.some(([text]) => text.includes(parentText)),
+                })),
+              ),
+          (parse) => Effect.sync(() => parse.mockRestore()),
+        );
+        const visible = window.visibleTurnItems;
+        assert.deepEqual(visible, full.visibleTurnItems.slice(-visible.length));
+        const page = firstPage(window);
+        assert.deepEqual(page, firstPage(full));
+        return { page, parsedParent };
       });
-      const actual = buildBoundedThreadProjection({
-        projection: snapshot.projection,
-        snapshotSequence: snapshot.snapshotSequence,
-      });
-      assert.deepEqual(actual, expected);
-      assert.isNotNull(actual.historyCursor);
-      assert.equal(decodeThreadHistoryCursor(actual.historyCursor!).p, 7);
-      const older = yield* store.getThreadHistoryPage(childId, actual.historyCursor!);
-      assert.deepEqual(
-        [...older.items, ...actual.projection.visibleTurnItems].map((row) => row.sourceItemId),
-        full.projection.visibleTurnItems.map((row) => row.sourceItemId),
+
+      yield* createThread(parentId, null);
+      for (const turn of [1, 2, 3]) yield* addTurn(parentId, turn, parentText);
+      // The parent kept going after the fork, so its third turn is not inherited.
+      yield* createThread(forkId, RunId.make(`run:${parentId}:2`));
+      for (let turn = 1; turn <= 9; turn += 1) yield* addTurn(forkId, turn, "fork prompt");
+
+      // Nine local turns leave room for the parent's last inherited turn, so
+      // the window still reads parent bodies.
+      const partial = yield* readFirstPage();
+      assert.include(
+        partial.page.items.map((row) => row.visibility),
+        "inherited",
       );
+      assert.isTrue(partial.parsedParent);
+
+      // Ten local turns fill the page: parent rows only shift positions and
+      // the cursor, so their bodies are not read.
+      yield* addTurn(forkId, 10, "fork prompt");
+      const filled = yield* readFirstPage();
+      assert.isNotNull(filled.page.historyCursor);
+      assert.isFalse(filled.parsedParent);
     }),
   );
 
