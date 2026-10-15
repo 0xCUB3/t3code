@@ -1,7 +1,6 @@
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
-import { LinkIcon, PlusIcon } from "lucide-react";
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
@@ -9,7 +8,14 @@ import { isElectron } from "../env";
 import { NoProjectsHero } from "../components/NoProjectsHero";
 import { sortScopedProjectsForSidebar } from "../components/Sidebar.logic";
 import { Button } from "../components/ui/button";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
+import { CommandBlock } from "../components/CommandBlock";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "../components/ui/empty";
 import { SidebarInset } from "../components/ui/sidebar";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
@@ -20,7 +26,7 @@ import {
   useThreadShells,
 } from "../state/entities";
 import { useEnvironments } from "../state/environments";
-import { APP_DISPLAY_NAME } from "~/branding";
+import { APP_DISPLAY_NAME, DESKTOP_DOWNLOAD_URL } from "~/branding";
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 
 function ChatIndexRouteView() {
@@ -132,14 +138,31 @@ export const Route = createFileRoute("/_chat/")({
   component: ChatIndexRouteView,
 });
 
+/**
+ * Hosted app with no computer yet. Points at the one command that brings a
+ * computer online, then at Connections to add it.
+ */
 function HostedStaticOnboardingState() {
   const cloudEnabled = hasCloudPublicConfig();
-  const localEnvironmentOff = isLocalEnvironmentDisabled();
-  const description = localEnvironmentOff
-    ? "The local environment is turned off. Connect a remote environment, or turn the local environment back on in Connections."
-    : cloudEnabled
-      ? "Enable T3 Connect on that machine, then open Connections here to sign in with the same account. You can also add the machine using a pairing link."
-      : "Open Connections and add that machine using its pairing link. This app must be able to reach it.";
+  // Desktop with its own computer switched off: it needs Connections, not a download.
+  const copy = isLocalEnvironmentDisabled()
+    ? {
+        title: "This computer is off",
+        body: "Turn it back on, or connect a different computer.",
+        command: null,
+        action: "Open Connections",
+      }
+    : {
+        title: "No computer connected",
+        body: "Your agents run on your computer. Start T3 Code there first.",
+        command: cloudEnabled ? "npx t3 connect" : "npx t3 pair",
+        action: cloudEnabled ? "Add your computer" : "Add pairing link",
+      };
+  const action = (
+    <Button render={<Link to="/settings/connections" />} size="sm">
+      {copy.action}
+    </Button>
+  );
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
@@ -153,25 +176,37 @@ function HostedStaticOnboardingState() {
         </WorkspacePageHeader>
 
         <Empty className="flex-1">
-          <div className="w-full max-w-xl rounded-3xl border border-border/55 bg-card/20 px-8 py-12 shadow-sm/5">
-            <EmptyHeader className="max-w-none">
-              <div className="mx-auto mb-5 flex size-11 items-center justify-center rounded-xl border border-border/70 bg-background/70 text-muted-foreground">
-                <LinkIcon className="size-5" />
-              </div>
-              <EmptyTitle>Connect to a computer running T3 Code</EmptyTitle>
-              <EmptyDescription>
-                This app connects to T3 Code running on your computer or a server. Start the T3 Code
-                desktop app or command-line server on that machine and keep it running.
-              </EmptyDescription>
-              <EmptyDescription>{description}</EmptyDescription>
-              <div className="mt-6 flex justify-center">
-                <Button render={<Link to="/settings/connections" />} size="sm">
-                  <PlusIcon className="size-4" />
-                  Open Connections
-                </Button>
-              </div>
-            </EmptyHeader>
-          </div>
+          <EmptyHeader>
+            <EmptyTitle>{copy.title}</EmptyTitle>
+            <EmptyDescription>{copy.body}</EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
+            {copy.command === null ? (
+              action
+            ) : (
+              <ol className="w-full space-y-4 text-left">
+                <li className="flex gap-3">
+                  <span className="pt-px text-muted-foreground">1</span>
+                  <div className="min-w-0 flex-1">
+                    <p>Run on your computer:</p>
+                    <CommandBlock command={copy.command} className="mt-2" />
+                    <a
+                      className="mt-2 inline-block text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                      href={DESKTOP_DOWNLOAD_URL}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                    >
+                      Or download the desktop app
+                    </a>
+                  </div>
+                </li>
+                <li className="flex items-center gap-3">
+                  <span className="text-muted-foreground">2</span>
+                  {action}
+                </li>
+              </ol>
+            )}
+          </EmptyContent>
         </Empty>
       </div>
     </SidebarInset>
