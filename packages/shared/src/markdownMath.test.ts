@@ -29,6 +29,23 @@ function text(markdown: string) {
 }
 
 describe("chat math parsing", () => {
+  it("keeps GFM autolink destinations intact while restoring literal dollars", () => {
+    const source = "Query www.example.com/?$select=id and $x$.";
+    const link = collect(parse(source)).find((node) => node.type === "link");
+    expect(link).toMatchObject({ url: "http://www.example.com/?$select=id" });
+    expect(formulas(source)).toEqual([["inline", "x"]]);
+  });
+
+  it("falls back to ordinary Markdown when every private-use marker is present", () => {
+    const source =
+      "$x$ " + Array.from({ length: 65536 }, (_, index) => String.fromCharCode(index)).join("");
+    const tree = parse(source);
+    expect(tree.type).toBe("root");
+    expect(
+      collect(tree).filter((node) => node.type === "math" || node.type === "inlineMath"),
+    ).toEqual([]);
+  });
+
   it("only exposes closed explicit math fences to editors and native rendering", () => {
     expect(markdownMathRanges("```math\nx^2")).toEqual([]);
     expect(markdownMathRanges("```math\nx^2\n```")[0]?.tex).toBe("x^2");

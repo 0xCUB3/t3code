@@ -6,7 +6,7 @@ import remarkGfm from "remark-gfm";
 import { unified } from "unified";
 import type { Parser, Plugin } from "unified";
 
-const proseParser = unified().use(remarkParse).freeze();
+const proseParser = unified().use(remarkParse).use(remarkGfm).freeze();
 const MAX_MATH_LENGTH = 4096;
 
 function escaped(source: string, offset: number) {
@@ -19,16 +19,18 @@ function escaped(source: string, offset: number) {
  * their UTF-16 lengths so task markers, citations and editor ranges keep offsets. */
 function normalizeMath(source: string) {
   let marker = 0xe000;
-  while (source.includes(String.fromCharCode(marker))) marker++;
-  const padding = String.fromCharCode(marker++);
-  while (source.includes(String.fromCharCode(marker))) marker++;
-  const dollar = String.fromCharCode(marker++);
-  while (source.includes(String.fromCharCode(marker))) marker++;
-  const pipe = String.fromCharCode(marker++);
-  while (source.includes(String.fromCharCode(marker))) marker++;
-  const newline = String.fromCharCode(marker++);
-  while (source.includes(String.fromCharCode(marker))) marker++;
-  const carriage = String.fromCharCode(marker);
+  const used = new Set(source.match(/[\uE000-\uF8FF]/g) ?? []);
+  const unusedMarker = () => {
+    while (marker <= 0xf8ff && used.has(String.fromCharCode(marker))) marker++;
+    return marker <= 0xf8ff ? String.fromCharCode(marker++) : null;
+  };
+  const padding = unusedMarker();
+  const dollar = unusedMarker();
+  const pipe = unusedMarker();
+  const newline = unusedMarker();
+  const carriage = unusedMarker();
+  if (padding === null || dollar === null || pipe === null || newline === null || carriage === null)
+    return null;
   const chars = source.split("");
   const ignored: Array<{ start: number; end: number }> = [];
   const visit = (node: Root | RootContent) => {
@@ -130,6 +132,7 @@ function normalizeMath(source: string) {
   const restore = (node: Root | RootContent, inTable = false) => {
     const table = inTable || node.type === "tableCell";
     if ("value" in node) node.value = decode(node.value);
+    if ("url" in node) node.url = decode(node.url);
     if (node.position)
       for (const point of [node.position.start, node.position.end]) {
         if (point.offset === undefined) continue;
@@ -167,6 +170,7 @@ export const remarkChatMath: Plugin<[], Root> = function () {
   if (parse)
     this.parser = (source, file) => {
       const normalized = normalizeMath(source);
+      if (!normalized) return proseParser.parse(source);
       const tree = parse(normalized.value, file);
       normalized.restore(tree);
       return tree;
