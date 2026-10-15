@@ -1,5 +1,6 @@
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useAuth } from "@clerk/react";
 import { CheckIcon } from "lucide-react";
@@ -143,8 +144,9 @@ export const Route = createFileRoute("/_chat/")({
 });
 
 /**
- * Hosted app with no computer yet. Lists the steps that bring one online:
- * T3 Connect sign-in plus `npx t3 connect`, or `npx t3 pair` without it.
+ * Hosted app with no computer yet. This is hosted onboarding: setup never
+ * opens here. With T3 Connect it recommends signing in, then adds the linked
+ * computers by itself. Without T3 Connect it points at `npx t3 pair`.
  */
 function HostedStaticOnboardingState() {
   const cloudEnabled = hasCloudPublicConfig();
@@ -196,6 +198,10 @@ function HostedStaticOnboardingState() {
 function T3ConnectSteps() {
   const { isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
   const { openAuthPrompt } = useT3ConnectAuthPrompt();
+  // Selection mode adds each linked computer once, the same way setup does.
+  // The first one added replaces this screen with the app.
+  const [autoAddedComputers] = useState(() => new Set<EnvironmentId>());
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<EnvironmentId>>(() => new Set());
   return (
     <>
       <SetupStep number={1}>
@@ -212,13 +218,23 @@ function T3ConnectSteps() {
       </SetupStep>
       <SetupStep number={2}>
         <RunOnComputer command="npx t3 connect" />
-        {/* Linked computers show up here to add, so the user never leaves this screen. */}
         {isSignedIn ? (
           <div className="mt-4 space-y-1.5">
             <CloudEnvironmentConnectRows
               primaryEnvironmentId={null}
               savedEnvironments={[]}
               refreshWhileEmpty
+              selection={{
+                autoSelectedComputers: autoAddedComputers,
+                selectedIds,
+                onChange: (environmentId, selected) =>
+                  setSelectedIds((current) => {
+                    const next = new Set(current);
+                    if (selected) next.add(environmentId);
+                    else next.delete(environmentId);
+                    return next;
+                  }),
+              }}
               empty={<p className="text-xs text-muted-foreground">Waiting for your computer…</p>}
             />
           </div>
