@@ -64,8 +64,8 @@ function ConfiguredConnectOnboardingDialog() {
 
   const { environments, isReady: environmentsReady } = useEnvironments();
   // With no computers in this browser, the hosted home screen adds the
-  // account's computers after sign-in, so this wizard would repeat it. An
-  // unloaded catalog is not known to be empty, so the wizard still opens.
+  // account's computers after sign-in, so this wizard would repeat it. A
+  // pending request waits for the catalog to load before this is decided.
   const homeScreenAddsComputers =
     isHostedStaticApp() && environmentsReady && environments.length === 0;
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -121,15 +121,10 @@ function ConfiguredConnectOnboardingDialog() {
     const previousAccount = observedAccountRef.current;
     const nextAccount = isSignedIn && userId ? userId : null;
     observedAccountRef.current = nextAccount;
-    if (
-      previousAccount !== undefined &&
-      previousAccount !== nextAccount &&
-      nextAccount !== null &&
-      !homeScreenAddsComputers
-    ) {
+    if (previousAccount !== undefined && previousAccount !== nextAccount && nextAccount !== null) {
       setRequestedAccount(nextAccount);
     }
-  }, [homeScreenAddsComputers, isLoaded, isSignedIn, userId]);
+  }, [isLoaded, isSignedIn, userId]);
 
   // A manageable session implies a primary environment, so when the scopes
   // allow publishing, wait for the connection target too — otherwise the
@@ -141,6 +136,10 @@ function ConfiguredConnectOnboardingDialog() {
   // that chose "Don't show this again" are skipped.
   useEffect(() => {
     if (requestedAccount === null || openForAccount !== null) return;
+    if (homeScreenAddsComputers) {
+      setRequestedAccount(null);
+      return;
+    }
     if (optOutAccounts.includes(requestedAccount)) {
       setRequestedAccount(null);
       return;
@@ -156,6 +155,7 @@ function ConfiguredConnectOnboardingDialog() {
   }, [
     canManageRelay,
     controller.linkState.target,
+    homeScreenAddsComputers,
     openForAccount,
     optOutAccounts,
     publishStepDecided,
