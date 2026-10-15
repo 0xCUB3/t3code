@@ -1,7 +1,9 @@
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
-import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import { useAuth } from "@clerk/react";
+import { CheckIcon } from "lucide-react";
+import { type ReactNode, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
 import { isElectron } from "../env";
@@ -9,6 +11,8 @@ import { NoProjectsHero } from "../components/NoProjectsHero";
 import { sortScopedProjectsForSidebar } from "../components/Sidebar.logic";
 import { Button } from "../components/ui/button";
 import { CommandBlock } from "../components/CommandBlock";
+import { useT3ConnectAuthPrompt } from "../components/clerk/useT3ConnectAuthPrompt";
+import { CloudEnvironmentConnectRows } from "../components/cloud/CloudEnvironmentConnectList";
 import {
   Empty,
   EmptyContent,
@@ -139,30 +143,13 @@ export const Route = createFileRoute("/_chat/")({
 });
 
 /**
- * Hosted app with no computer yet. Points at the one command that brings a
- * computer online, then at Connections to add it.
+ * Hosted app with no computer yet. Lists the steps that bring one online:
+ * T3 Connect sign-in plus `npx t3 connect`, or `npx t3 pair` without it.
  */
 function HostedStaticOnboardingState() {
   const cloudEnabled = hasCloudPublicConfig();
   // Desktop with its own computer switched off: it needs Connections, not a download.
-  const copy = isLocalEnvironmentDisabled()
-    ? {
-        title: "This computer is off",
-        body: "Turn it back on, or connect a different computer.",
-        command: null,
-        action: "Open Connections",
-      }
-    : {
-        title: "No computer connected",
-        body: "Your agents run on your computer. Start T3 Code there first.",
-        command: cloudEnabled ? "npx t3 connect" : "npx t3 pair",
-        action: cloudEnabled ? "Add your computer" : "Add pairing link",
-      };
-  const action = (
-    <Button render={<Link to="/settings/connections" />} size="sm">
-      {copy.action}
-    </Button>
-  );
+  const localEnvironmentOff = isLocalEnvironmentDisabled();
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
@@ -177,38 +164,113 @@ function HostedStaticOnboardingState() {
 
         <Empty className="flex-1">
           <EmptyHeader>
-            <EmptyTitle>{copy.title}</EmptyTitle>
-            <EmptyDescription>{copy.body}</EmptyDescription>
+            <EmptyTitle>
+              {localEnvironmentOff ? "This computer is off" : "No computer connected"}
+            </EmptyTitle>
+            <EmptyDescription>
+              {localEnvironmentOff
+                ? "Turn it back on, or connect a different computer."
+                : cloudEnabled
+                  ? "Your agents run on your computer."
+                  : "Your agents run on your computer. Start T3 Code there first."}
+            </EmptyDescription>
           </EmptyHeader>
           <EmptyContent>
-            {copy.command === null ? (
-              action
+            {localEnvironmentOff ? (
+              <Button render={<Link to="/settings/connections" />} size="sm">
+                Open Connections
+              </Button>
             ) : (
               <ol className="w-full space-y-4 text-left">
-                <li className="flex gap-3">
-                  <span className="pt-px text-muted-foreground">1</span>
-                  <div className="min-w-0 flex-1">
-                    <p>Run on your computer:</p>
-                    <CommandBlock command={copy.command} className="mt-2" />
-                    <a
-                      className="mt-2 inline-block text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
-                      href={DESKTOP_DOWNLOAD_URL}
-                      target="_blank"
-                      rel="noreferrer noopener"
-                    >
-                      Or download the desktop app
-                    </a>
-                  </div>
-                </li>
-                <li className="flex items-center gap-3">
-                  <span className="text-muted-foreground">2</span>
-                  {action}
-                </li>
+                {cloudEnabled ? <T3ConnectSteps /> : <PairingSteps />}
               </ol>
             )}
           </EmptyContent>
         </Empty>
       </div>
     </SidebarInset>
+  );
+}
+
+/** Needs ClerkProvider, which the app mounts whenever cloud config exists. */
+function T3ConnectSteps() {
+  const { isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
+  const { openAuthPrompt } = useT3ConnectAuthPrompt();
+  return (
+    <>
+      <SetupStep number={1}>
+        {isSignedIn ? (
+          <p className="flex items-center gap-1.5 text-muted-foreground">
+            <CheckIcon className="size-4" />
+            Signed in
+          </p>
+        ) : (
+          <Button size="sm" disabled={!isLoaded} onClick={openAuthPrompt}>
+            Sign in
+          </Button>
+        )}
+      </SetupStep>
+      <SetupStep number={2}>
+        <RunOnComputer command="npx t3 connect" />
+        {/* Linked computers show up here to add, so the user never leaves this screen. */}
+        {isSignedIn ? (
+          <div className="mt-4 space-y-1.5">
+            <CloudEnvironmentConnectRows
+              primaryEnvironmentId={null}
+              savedEnvironments={[]}
+              refreshWhileEmpty
+              empty={<p className="text-xs text-muted-foreground">Waiting for your computer…</p>}
+            />
+          </div>
+        ) : null}
+      </SetupStep>
+    </>
+  );
+}
+
+function PairingSteps() {
+  return (
+    <>
+      <SetupStep number={1}>
+        <RunOnComputer command="npx t3 pair" />
+      </SetupStep>
+      <SetupStep number={2}>
+        <Button render={<Link to="/settings/connections" />} size="sm">
+          Add pairing link
+        </Button>
+      </SetupStep>
+    </>
+  );
+}
+
+function SetupStep({
+  number,
+  children,
+}: {
+  readonly number: number;
+  readonly children: ReactNode;
+}) {
+  return (
+    <li className="flex gap-3">
+      <span className="w-2 shrink-0 pt-1 text-muted-foreground">{number}</span>
+      <div className="min-w-0 flex-1">{children}</div>
+    </li>
+  );
+}
+
+function RunOnComputer({ command }: { readonly command: string }) {
+  return (
+    <>
+      <p>Run on your computer:</p>
+      <CommandBlock command={command} className="mt-2" />
+      <a
+        className="mt-2 inline-block text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+        href={DESKTOP_DOWNLOAD_URL}
+        target="_blank"
+        rel="noreferrer noopener"
+      >
+        Or download the desktop app
+      </a>
+    </>
   );
 }
