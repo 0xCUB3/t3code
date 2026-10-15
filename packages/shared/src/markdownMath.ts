@@ -20,21 +20,11 @@ function escaped(source: string, offset: number) {
 function normalizeMath(source: string) {
   let marker = 0xe000;
   const used = new Set(source.match(/[\uE000-\uF8FF]/g) ?? []);
-  const unusedMarker = () => {
-    while (marker <= 0xf8ff && used.has(String.fromCharCode(marker))) marker++;
-    return marker <= 0xf8ff ? String.fromCharCode(marker++) : null;
-  };
-  const padding = unusedMarker();
-  const dollar = unusedMarker();
-  const pipe = unusedMarker();
-  const newline = unusedMarker();
-  const carriage = unusedMarker();
-  if (padding === null || dollar === null || pipe === null || newline === null || carriage === null)
-    return null;
-  const chars = source.split("");
   const ignored: Array<{ start: number; end: number }> = [];
   const tables: Array<{ start: number; end: number }> = [];
   const visit = (node: Root | RootContent) => {
+    for (const value of ["value" in node ? node.value : "", "url" in node ? node.url : ""])
+      for (const symbol of value.match(/[\uE000-\uF8FF]/g) ?? []) used.add(symbol);
     if (node.type === "table") {
       const start = node.position?.start.offset;
       const end = node.position?.end.offset;
@@ -55,9 +45,22 @@ function normalizeMath(source: string) {
       const start = node.position?.start.offset;
       const end = node.position?.end.offset;
       if (start !== undefined && end !== undefined) ignored.push({ start, end });
-    } else if ("children" in node) node.children.forEach(visit);
+    }
+    if ("children" in node) node.children.forEach(visit);
   };
   visit(proseParser.parse(source));
+  const unusedMarker = () => {
+    while (marker <= 0xf8ff && used.has(String.fromCharCode(marker))) marker++;
+    return marker <= 0xf8ff ? String.fromCharCode(marker++) : null;
+  };
+  const padding = unusedMarker();
+  const dollar = unusedMarker();
+  const pipe = unusedMarker();
+  const newline = unusedMarker();
+  const carriage = unusedMarker();
+  if (padding === null || dollar === null || pipe === null || newline === null || carriage === null)
+    return null;
+  const chars = source.split("");
   const overlaps = (start: number, end: number) =>
     ignored.some((range) => start < range.end && end > range.start);
   const ranges = new Map<number, { end: number; display: boolean }>();

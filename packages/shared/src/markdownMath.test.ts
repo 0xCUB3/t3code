@@ -36,6 +36,24 @@ describe("chat math parsing", () => {
     expect(formulas(source)).toEqual([["inline", "x"]]);
   });
 
+  it.each(["&#57344;", "&#xE000;", "&#xe000;"])(
+    "preserves decoded private-use reference %s",
+    (reference) => {
+      const source = `${reference} [${reference}](https://example.com/?q=${reference}) $x$`;
+      const nodes = collect(parse(source));
+      expect(
+        nodes
+          .filter((node) => node.type === "text")
+          .map((node) => node.value)
+          .join(""),
+      ).toBe("\uE000 \uE000 ");
+      expect(nodes.find((node) => node.type === "link")).toMatchObject({
+        url: "https://example.com/?q=\uE000",
+      });
+      expect(formulas(source)).toEqual([["inline", "x"]]);
+    },
+  );
+
   it.each(["\\(x\\)", "\\[x\\]", "$x$", "$$x$$"])(
     "preserves indented code containing %s",
     (formula) => {
