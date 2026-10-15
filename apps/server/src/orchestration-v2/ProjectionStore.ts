@@ -1397,12 +1397,13 @@ function visibleTurnItemsThroughRun(input: {
 function buildVisibleTurnItems(input: {
   readonly projection: OrchestrationV2ThreadProjection;
   readonly sourceProjection: OrchestrationV2ThreadProjection | null;
-  readonly inheritedItemCount?: number;
+  /** Inherited rows a window counted instead of reading; positions start after them. */
+  readonly inheritedRowCount?: number;
 }): Array<OrchestrationV2ProjectedTurnItem> {
   const forkedFrom = input.projection.thread.forkedFrom;
   if (
     forkedFrom?.type !== "run" ||
-    (input.sourceProjection === null && input.inheritedItemCount === undefined)
+    (input.sourceProjection === null && input.inheritedRowCount === undefined)
   ) {
     return localVisibleTurnItems(input.projection);
   }
@@ -1437,7 +1438,7 @@ function buildVisibleTurnItems(input: {
       },
       ...local,
     ],
-    input.inheritedItemCount ?? 0,
+    input.inheritedRowCount ?? 0,
   );
 }
 
@@ -2773,7 +2774,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         ),
       );
 
-    const readWindowTurnItemRows = (
+    // The rows a bounded window keeps for one thread: the newest user turns up
+    // to the limit (rows up to the limit when nothing starts a turn), the
+    // interrupt requests they depend on, and the latest row. Ends with the
+    // `retained` CTE so a read can fetch the payloads or only count the rows.
+    const retainedWindowRows = (
       threadId: ThreadId,
       window: {
         readonly rowLimit: number;
@@ -2781,8 +2786,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         readonly anchorItemId?: TurnItemId | undefined;
         readonly requiredRunId?: RunId | undefined;
       },
-      countOnly = false,
-    ) => sql<PayloadRow & { readonly retained_count: number }>`
+    ) => sql`
                 WITH eligible AS NOT MATERIALIZED (
                   SELECT item.rowid AS item_rowid, item.payload_json, item.ordinal, item.turn_item_id,
                     item.run_id, item.node_id, item.type
@@ -2947,32 +2951,6 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   ) AS latest
                   ORDER BY ordinal ASC, turn_item_id ASC
                 )
-                -- CROSS JOIN keeps the sorted IDs as the outer loop, so SQLite
-                -- skips sorting again once the payloads are attached. Carry the
-                -- rowid through selection to avoid a second string-key index lookup.
-                SELECT ${countOnly ? sql`'' AS payload_json, COUNT(*) AS retained_count` : sql`item.payload_json, 0 AS retained_count`}
-                FROM retained
-                CROSS JOIN orchestration_v2_projection_turn_items AS item
-                  ON item.rowid = retained.item_rowid
-                ${
-                  countOnly
-                    ? sql`WHERE EXISTS (
-                    SELECT 1 FROM orchestration_v2_projection_runs
-                    WHERE thread_id = ${threadId} AND run_id = ${window.requiredRunId ?? null}
-                  ) AND ((item.run_id IS NULL AND EXISTS (
-                    SELECT 1 FROM orchestration_v2_projection_threads source
-                    WHERE source.thread_id = ${threadId}
-                      AND json_extract(source.payload_json, '$.historyOrigin') = 'v1_import'
-                  )) OR item.run_id IN (
-                    SELECT run_id FROM orchestration_v2_projection_runs
-                    WHERE thread_id = ${threadId} AND ordinal <= (
-                      SELECT ordinal FROM orchestration_v2_projection_runs
-                      WHERE thread_id = ${threadId} AND run_id = ${window.requiredRunId ?? null}
-                    )
-                  ))`
-                    : sql``
-                }
-                ORDER BY retained.ordinal ASC, retained.turn_item_id ASC
               `;
 
     const readCanonicalProjection = (
@@ -3013,7 +2991,17 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   ${filter?.turnItemRunIds === undefined ? sql`` : sql`AND (run_id IN (SELECT value FROM json_each(${encodeIdList(filter.turnItemRunIds.filter((id): id is RunId => id !== null))})) OR (${filter.turnItemRunIds.includes(null) ? 1 : 0} = 1 AND run_id IS NULL))`}
                 ORDER BY ordinal ASC, turn_item_id ASC
               `
-              : yield* readWindowTurnItemRows(threadId, window);
+              : yield* sql<PayloadRow>`
+                ${retainedWindowRows(threadId, window)}
+                -- CROSS JOIN keeps the sorted IDs as the outer loop, so SQLite
+                -- skips sorting again once the payloads are attached. Carry the
+                -- rowid through selection to avoid a second string-key index lookup.
+                SELECT item.payload_json
+                FROM retained
+                CROSS JOIN orchestration_v2_projection_turn_items AS item
+                  ON item.rowid = retained.item_rowid
+                ORDER BY retained.ordinal ASC, retained.turn_item_id ASC
+              `;
         // Reuse the decoded items for cohort IDs and the resulting projection.
         // Parsing these rows separately duplicates every retained tool output.
         const turnItems = yield* decodeRows(decodeTurnItemPayload, threadId)(boundedTurnItemRows);
@@ -3597,41 +3585,46 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 };
               });
 
-        // When local turns fill the page, only the parent's row count affects
-        // the cursor. Nested forks keep the existing ancestry read.
+        // A fork whose own turns fill its first page shows no inherited row
+        // there, but the inherited count still sets the page's positions and
+        // history cursor. Count the parent's retained rows instead of reading
+        // and decoding their bodies. The count mirrors visibleTurnItemsThroughRun
+        // for a parent with no inherited rows of its own: a parent that is itself
+        // a run fork returns NULL and keeps the full ancestry read.
         if (
           window?.userTurnLimit !== undefined &&
-          window.userTurnLimit > 0 &&
-          seenThreadIds.size === 0 &&
           window.historyAnchor === undefined &&
+          seenThreadIds.size === 0 &&
           sourceWindow !== undefined &&
           activeLocalTurnItems(projection).filter((row) => isThreadHistoryUserTurn(row.item))
             .length >= Math.max(window.userTurnLimit, THREAD_HISTORY_PAGE_POLICY.maxUserTurns)
         ) {
-          const sourceThreadRows = yield* sql<PayloadRow>`
-            SELECT payload_json FROM orchestration_v2_projection_threads
-            WHERE thread_id = ${forkedFrom.threadId} LIMIT 1
+          const counted = yield* sql<{ readonly inherited_rows: number | null }>`
+            ${retainedWindowRows(forkedFrom.threadId, {
+              ...sourceWindow,
+              rowLimit: sourceWindow.suppressLocal ? 0 : sourceWindow.rowLimit,
+            })}
+            SELECT CASE
+              WHEN json_extract(source.payload_json, '$.forkedFrom.type') = 'run' THEN NULL
+              WHEN NOT EXISTS (
+                SELECT 1 FROM orchestration_v2_projection_runs
+                WHERE thread_id = source.thread_id AND run_id = ${forkedFrom.runId}
+              ) THEN 0
+              ELSE (SELECT COUNT(*) FROM retained)
+            END AS inherited_rows
+            FROM orchestration_v2_projection_threads AS source
+            WHERE source.thread_id = ${forkedFrom.threadId}
           `;
-          if (sourceThreadRows[0] !== undefined) {
-            const sourceThread = yield* decodeThreadPayload(sourceThreadRows[0].payload_json);
-            if (sourceThread.forkedFrom?.type !== "run") {
-              const counts = yield* readWindowTurnItemRows(
-                forkedFrom.threadId,
-                {
-                  ...sourceWindow,
-                  rowLimit: sourceWindow.suppressLocal ? 0 : sourceWindow.rowLimit,
-                },
-                true,
-              );
-              return {
-                ...projection,
-                visibleTurnItems: buildVisibleTurnItems({
-                  projection,
-                  sourceProjection: null,
-                  inheritedItemCount: counts[0]?.retained_count ?? 0,
-                }),
-              };
-            }
+          const inheritedRowCount = counted[0]?.inherited_rows ?? null;
+          if (inheritedRowCount !== null) {
+            return {
+              ...projection,
+              visibleTurnItems: buildVisibleTurnItems({
+                projection,
+                sourceProjection: null,
+                inheritedRowCount,
+              }),
+            };
           }
         }
 
