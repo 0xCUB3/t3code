@@ -14,6 +14,7 @@ import {
   ConnectOnboardingOptOutSchema,
   EMPTY_CONNECT_ONBOARDING_OPT_OUT_STATE,
 } from "~/cloud/connectOnboarding";
+import { isHostedStaticApp } from "../../hostedPairing";
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { useCloudLinkController } from "~/cloud/useCloudLinkController";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
@@ -39,6 +40,7 @@ import { WizardSteps, WizardPopup, WizardHeader, WizardPanel, WizardFooter } fro
  * current session is authorized to manage the relay link, then lists the
  * account's T3 Connect environments so every device can be connected right
  * away. A cold load with a restored session does not count as a sign-in.
+ * The hosted app with no computers skips it: its home screen adds them.
  */
 export function ConnectOnboardingDialog() {
   if (!hasCloudPublicConfig()) return null;
@@ -60,7 +62,10 @@ function ConfiguredConnectOnboardingDialog() {
     ConnectOnboardingOptOutSchema,
   );
 
-  const { isReady: environmentsReady } = useEnvironments();
+  const { environments, isReady: environmentsReady } = useEnvironments();
+  // With no computers in this browser, the hosted home screen adds the
+  // account's computers after sign-in, so this wizard would repeat it.
+  const homeScreenAddsComputers = isHostedStaticApp() && environments.length === 0;
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const primarySessionState = useAtomValue(
     primaryEnvironmentId === null
@@ -114,10 +119,15 @@ function ConfiguredConnectOnboardingDialog() {
     const previousAccount = observedAccountRef.current;
     const nextAccount = isSignedIn && userId ? userId : null;
     observedAccountRef.current = nextAccount;
-    if (previousAccount !== undefined && previousAccount !== nextAccount && nextAccount !== null) {
+    if (
+      previousAccount !== undefined &&
+      previousAccount !== nextAccount &&
+      nextAccount !== null &&
+      !homeScreenAddsComputers
+    ) {
       setRequestedAccount(nextAccount);
     }
-  }, [isLoaded, isSignedIn, userId]);
+  }, [homeScreenAddsComputers, isLoaded, isSignedIn, userId]);
 
   // A manageable session implies a primary environment, so when the scopes
   // allow publishing, wait for the connection target too — otherwise the

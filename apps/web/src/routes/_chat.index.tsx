@@ -30,7 +30,7 @@ import {
   useProjects,
   useThreadShells,
 } from "../state/entities";
-import { useEnvironments } from "../state/environments";
+import { useEnvironments, useRelayEnvironmentDiscovery } from "../state/environments";
 import { APP_DISPLAY_NAME, DESKTOP_DOWNLOAD_URL } from "~/branding";
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 
@@ -199,9 +199,13 @@ function T3ConnectSteps() {
   const { isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
   const { openAuthPrompt } = useT3ConnectAuthPrompt();
   // Selection mode adds each linked computer once, the same way setup does.
-  // The first one added replaces this screen with the app.
+  // The first one added replaces this screen with the app, so wait until
+  // every computer's health check is done and add them all in one pass.
   const [autoAddedComputers] = useState(() => new Set<EnvironmentId>());
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<EnvironmentId>>(() => new Set());
+  const discovered = [...useRelayEnvironmentDiscovery().environments.values()];
+  const discoverySettled =
+    discovered.length > 0 && discovered.every(({ availability }) => availability !== "checking");
   return (
     <>
       <SetupStep number={1}>
@@ -225,7 +229,7 @@ function T3ConnectSteps() {
               savedEnvironments={[]}
               refreshWhileEmpty
               selection={{
-                autoSelectedComputers: autoAddedComputers,
+                ...(discoverySettled ? { autoSelectedComputers: autoAddedComputers } : {}),
                 selectedIds,
                 onChange: (environmentId, selected) =>
                   setSelectedIds((current) => {
