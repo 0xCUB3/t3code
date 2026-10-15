@@ -36,6 +36,17 @@ describe("chat math parsing", () => {
     expect(formulas(source)).toEqual([["inline", "x"]]);
   });
 
+  it.each(["\\(x\\)", "\\[x\\]", "$x$", "$$x$$"])(
+    "preserves indented code containing %s",
+    (formula) => {
+      const source = `    ${formula}`;
+      expect(collect(parse(source)).find((node) => node.type === "code")).toMatchObject({
+        value: formula,
+      });
+      expect(markdownMathRanges(source)).toEqual([]);
+    },
+  );
+
   it("falls back to ordinary Markdown when every private-use marker is present", () => {
     const source =
       "$x$ " + Array.from({ length: 65536 }, (_, index) => String.fromCharCode(index)).join("");
@@ -185,6 +196,13 @@ describe("chat math parsing", () => {
 });
 
 describe("math in GFM tables", () => {
+  it("retains multiline math after a prose pipe outside tables", () => {
+    const source = "a | b: \\(x\n+y\\)";
+    expect(formulas(source)).toEqual([["inline", "x\n+y"]]);
+    expect(markdownMathRanges(source)).toEqual([
+      expect.objectContaining({ source: "\\(x\n+y\\)", inTable: false }),
+    ]);
+  });
   it.each(["\\(", "\\["])("keeps table rows intact when %s closes in a later row", (opener) => {
     const closer = opener === "\\(" ? "\\)" : "\\]";
     const source = `| Name | Value |\n| --- | --- |\n| first | ${opener}x |\n| second | y${closer} |\n| valid | $|z|$ |`;

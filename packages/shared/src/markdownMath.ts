@@ -33,7 +33,13 @@ function normalizeMath(source: string) {
     return null;
   const chars = source.split("");
   const ignored: Array<{ start: number; end: number }> = [];
+  const tables: Array<{ start: number; end: number }> = [];
   const visit = (node: Root | RootContent) => {
+    if (node.type === "table") {
+      const start = node.position?.start.offset;
+      const end = node.position?.end.offset;
+      if (start !== undefined && end !== undefined) tables.push({ start, end });
+    }
     if (
       [
         "code",
@@ -51,7 +57,7 @@ function normalizeMath(source: string) {
       if (start !== undefined && end !== undefined) ignored.push({ start, end });
     } else if ("children" in node) node.children.forEach(visit);
   };
-  if (/[`~[<]/.test(source)) visit(proseParser.parse(source));
+  visit(proseParser.parse(source));
   const overlaps = (start: number, end: number) =>
     ignored.some((range) => start < range.end && end > range.start);
   const ranges = new Map<number, { end: number; display: boolean }>();
@@ -88,9 +94,9 @@ function normalizeMath(source: string) {
     if (!body) continue;
     if (open === "$" && (/^\s|\s$|[\r\n]/.test(body) || /\d/.test(source[end + 1] ?? ""))) continue;
     if (open === "\\[" && /^[\d,\s]+$/.test(body)) continue;
-    const lineStart = source.lastIndexOf("\n", start - 1) + 1;
     // GFM cells cannot continue into the next row.
-    if (/[\r\n]/.test(body) && source.slice(lineStart, start).includes("|")) continue;
+    if (/[\r\n]/.test(body) && tables.some((table) => start >= table.start && start < table.end))
+      continue;
     const display = open === "$$" || open === "\\[";
     const block =
       display &&
