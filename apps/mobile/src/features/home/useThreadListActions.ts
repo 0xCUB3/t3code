@@ -512,7 +512,7 @@ export function useThreadListActions(): {
           timeoutMs: TITLE_REGENERATION_TIMEOUT_MS,
           signal: watcher.signal,
         }).then((failure) => {
-          if (failure !== null) Alert.alert("Could not regenerate title", failure);
+          if (failure !== null) Dialog.alert("Could not regenerate title", failure);
         });
         const result = await updateThreadMetadata({
           environmentId: thread.environmentId,
