@@ -2573,8 +2573,6 @@ export const make = Effect.gen(function* () {
       // The returned PR URL names the repository that actually owns it.
       repositoryKey: pullRequestRepositoryKey(latest.url),
     };
-    // branchPullRequest confirms a terminal answer with fresh git state, so
-    // this tip is never older than the branch's last move.
     if (branchMovedPastPullRequest(tipOid, latest)) {
       return options.includeMovedPast === true
         ? { ...pullRequest, movedPast: true as const }
@@ -2591,8 +2589,13 @@ export const make = Effect.gen(function* () {
     const pullRequest = yield* lookupBranchPullRequest(cacheCwd, branch, {
       refresh,
       freshGitState,
+      includeMovedPast: true,
     });
-    if (pullRequest === null || pullRequest.state === "open" || freshGitState) return pullRequest;
+    if (pullRequest === null || pullRequest.state === "open") return pullRequest;
+    if (freshGitState) return "movedPast" in pullRequest ? null : pullRequest;
+    // A terminal answer, including one dropped because the remembered tip had
+    // moved past it, is confirmed against fresh git state: the branch may have
+    // been reset back onto the PR's head since that tip was read.
     return yield* lookupBranchPullRequest(cacheCwd, branch, {
       refresh: false,
       freshGitState: true,

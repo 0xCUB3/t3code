@@ -2689,6 +2689,48 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       }),
   );
 
+  it.effect("branch lookup finds a merged PR again once its branch is reset onto the PR head", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+      yield* runGit(repoDir, ["checkout", "-b", "develop"]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "develop"]);
+      const releasedHead = (yield* runGit(repoDir, ["rev-parse", "HEAD"])).stdout.trim();
+      yield* runGit(repoDir, ["commit", "--allow-empty", "-m", "Work after the release merged"]);
+
+      const { manager } = yield* makeManager({
+        ghScenario: {
+          prListSequence: [
+            encodeCliJson([
+              {
+                number: 3,
+                title: "Release develop into main",
+                url: "https://github.com/pingdotgg/t3code/pull/3",
+                baseRefName: "main",
+                headRefName: "develop",
+                headRefOid: releasedHead,
+                state: "MERGED",
+                mergedAt: "2026-04-02T15:00:00Z",
+                updatedAt: "2026-04-02T15:00:00Z",
+              },
+            ]),
+          ],
+        },
+      });
+
+      expect(yield* manager.branchPullRequest({ cwd: repoDir, branch: "develop" })).toBeNull();
+      // Outside the app, so the remembered branch tip is not invalidated.
+      yield* runGit(repoDir, ["reset", "--hard", releasedHead]);
+      const restored = yield* manager.branchPullRequest({ cwd: repoDir, branch: "develop" });
+
+      expect(restored?.number).toBe(3);
+      expect(restored?.state).toBe("merged");
+    }),
+  );
+
   it.effect("status still looks up PRs for a branch pushed without --set-upstream", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
