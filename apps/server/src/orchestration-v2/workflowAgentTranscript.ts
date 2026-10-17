@@ -89,6 +89,11 @@ export const readWorkflowAgentTranscript = Effect.fn("orchestration.readWorkflow
       endOffset: file.endOffset,
       lineCount: lines.length,
     });
-    return { lines, cursor: { offset: file.endOffset, identity: file.identity } };
+    return {
+      lines,
+      cursor: { offset: file.endOffset, identity: file.identity },
+      // More complete lines may follow past the per-read cap.
+      truncated: file.truncated,
+    };
   },
 );

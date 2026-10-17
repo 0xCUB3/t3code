@@ -13959,6 +13959,60 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     ),
   );
 
+  it.effect("reads a settled workflow member's transcript to its end past the read cap", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const harness = yield* makeWorkflowHarness;
+        // About 1.3 MB of early replies: more than the launch frame's read
+        // and the settled frame's read together, at 512 KB each.
+        const filler = "x".repeat(16 * 1024);
+        NodeFS.writeFileSync(
+          NodePath.join(harness.transcriptDir, "agent-a1.jsonl"),
+          Array.from({ length: 80 }, (_, index) =>
+            memberAssistantLine(`line-early-${index}`, `msg_early_${index}`, [
+              { type: "text", text: `${index} ${filler}` },
+            ]),
+          ).join("") +
+            memberAssistantLine("line-final", "msg_final", [
+              { type: "text", text: "FINAL ANSWER" },
+            ]),
+        );
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("attempt-claude-workflow-member-long-transcript"),
+            text: "Run the alpha workflow.",
+            attachments: [],
+          }),
+        );
+        yield* launchWorkflow({ harness, snapshotUuid: "00000000-0000-4000-8000-000000001390" });
+        const threadId = workflowMemberEvents(harness.events, 1)[0]?.subagent.childThreadId;
+        yield* harness.offerAndWait(
+          workflowNotification({
+            uuid: "00000000-0000-4000-8000-000000001391",
+            status: "completed",
+          }),
+        );
+        const texts = threadMessages(harness.events, threadId)
+          .filter((event) => event.message.role === "assistant")
+          .map((event) => event.message.text);
+        assert.lengthOf(texts, 81);
+        assert.equal(texts.at(-1), "FINAL ANSWER", "the answer past the first read is shown");
+        yield* Queue.offer(
+          harness.sdkMessages,
+          makeResultFrame({ uuid: "00000000-0000-4000-8000-000000001392", result: "Done." }),
+        );
+        yield* Queue.take(harness.terminalReceipts);
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
   it.effect("re-reads a workflow member's transcript after a restart without new items", () =>
     Effect.scoped(
       Effect.gen(function* () {
