@@ -1,24 +1,27 @@
+import { useAtomValue } from "@effect/atom-react";
 import {
   workflowOpeningHeadline,
   type WorkflowOpening,
 } from "@t3tools/client-runtime/state/subagentRuntime";
-import type { ServerProvider } from "@t3tools/contracts";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { WorkflowIcon } from "lucide-react";
 import { useState } from "react";
 
+import { providersIgnoringCheckedAtAtom } from "../../state/server";
 import { CollapsibleSectionHeader } from "../ui/collapsible-section-header";
 import { WorkflowPhaseList } from "./ThreadLineageWorkflowRow";
 
 /** Opens a workflow coordinator's thread in place of its script: the plan, then the script on demand. */
 export function WorkflowOpeningBlock(props: {
   readonly opening: WorkflowOpening;
-  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly environmentId: EnvironmentId;
   readonly onOpenThread: (threadId: string) => void;
 }) {
   const [scriptOpen, setScriptOpen] = useState(false);
   const { opening } = props;
+  const providers = useAtomValue(providersIgnoringCheckedAtAtom(props.environmentId));
   const headline = workflowOpeningHeadline(opening);
-  const provider = props.providers.find((entry) => entry.instanceId === opening.providerInstanceId);
+  const provider = providers.find((entry) => entry.instanceId === opening.providerInstanceId);
   return (
     <section
       aria-label={`Workflow started: ${headline.title}`}
@@ -45,7 +48,7 @@ export function WorkflowOpeningBlock(props: {
           group={opening.group}
           providerInstanceId={opening.providerInstanceId}
           provider={provider}
-          providers={props.providers}
+          providers={providers}
           driver={opening.driver ?? provider?.driver}
           onOpenThread={props.onOpenThread}
           isThreadAvailable={() => true}
