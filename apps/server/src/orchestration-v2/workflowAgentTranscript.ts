@@ -50,7 +50,7 @@ export const WorkflowAgentTranscriptReadObserver = Context.Reference<
  * harness bookkeeping (hook output, skill listings, injected context), and a
  * line without a uuid cannot be projected idempotently.
  */
-export function parseWorkflowAgentTranscriptLines(contents: string): ReadonlyArray<unknown> {
+function parseWorkflowAgentTranscriptLines(contents: string): ReadonlyArray<unknown> {
   return contents.split("\n").flatMap((line) => {
     if (line.trim().length === 0) return [];
     const entry = Option.getOrUndefined(decodeJsonLine(line));

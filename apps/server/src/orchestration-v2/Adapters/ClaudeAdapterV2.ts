@@ -4722,9 +4722,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               }
             }
             if (settled) {
-              // As for an ordinary subagent: a call left open when the member
-              // fails or is stopped will never get its result.
-              if (status === "failed" || status === "cancelled") yield* endOpenToolCalls();
+              // As for an ordinary subagent, a call still open once the member
+              // settles will never get its result.
+              yield* endOpenToolCalls();
               // Only the progress excerpt is left when the transcript says nothing.
               if (!textShown && !resultShown && member.result !== undefined) {
                 yield* emitSubagentConversationMessage({
