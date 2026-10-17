@@ -11396,7 +11396,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       yield* fileSystem.makeDirectory(transcriptDir, { recursive: true });
       yield* fileSystem.writeFileString(
         NodePath.join(transcriptDir, "agent-a1.jsonl"),
-        `{"type":"assistant","uuid":"wf-line-1-${options?.nativeSessionId ?? "default"}","message":{"role":"assistant","id":"msg_a1","content":[{"type":"text","text":"A1 from the transcript"}]}}\n`,
+        `{"type":"assistant","uuid":"wf-line-1-${options?.nativeSessionId ?? "default"}","message":{"role":"assistant","stop_reason":"end_turn","id":"msg_a1","content":[{"type":"text","text":"A1 from the transcript"}]}}\n`,
       );
       const harness = yield* makeWakeHarnessWithOptions({
         ...options,
@@ -12495,7 +12495,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             yield* fileSystem.makeDirectory(liveTranscriptDir);
             yield* fileSystem.writeFileString(
               NodePath.join(liveTranscriptDir, "agent-a1.jsonl"),
-              '{"type":"assistant","uuid":"wf-line-2","message":{"role":"assistant","content":[{"type":"text","text":"Live member answer"}]}}\n',
+              '{"type":"assistant","uuid":"wf-line-2","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"Live member answer"}]}}\n',
             );
             const liveTaskId = "task-workflow-live-while-waiting";
             const liveToolUseId = "toolu-workflow-live-while-waiting";
@@ -13557,7 +13557,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         );
         NodeFS.writeFileSync(
           NodePath.join(harness.transcriptDir, "agent-a2.jsonl"),
-          '{"type":"assistant","uuid":"wf-line-3","message":{"role":"assistant","id":"msg_late","content":[{"type":"text","text":"A2 final answer"}]}}\n',
+          '{"type":"assistant","uuid":"wf-line-3","message":{"role":"assistant","stop_reason":"end_turn","id":"msg_late","content":[{"type":"text","text":"A2 final answer"}]}}\n',
         );
         yield* Queue.offer(
           harness.sdkMessages,
@@ -13668,7 +13668,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         const memberEventsBeforeRepeat = workflowMemberEvents(harness.events, 2).length;
         NodeFS.appendFileSync(
           NodePath.join(harness.transcriptDir, "agent-a1.jsonl"),
-          '{"type":"assistant","uuid":"wf-line-4","message":{"role":"assistant","id":"msg_a1","content":[{"type":"text","text":"A1 continued"}]}}\n',
+          '{"type":"assistant","uuid":"wf-line-4","message":{"role":"assistant","stop_reason":"end_turn","id":"msg_a1","content":[{"type":"text","text":"A1 continued"}]}}\n',
         );
         yield* harness.offerAndWait(
           workflowSnapshot({ uuid: "00000000-0000-4000-8000-000000001015", state: "done" }),
@@ -13687,7 +13687,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         assert.deepEqual(currentAssistantAnswers(), ["A1 from the transcript", "A1 continued"]);
         NodeFS.writeFileSync(
           NodePath.join(harness.transcriptDir, "agent-a2.jsonl"),
-          '{"type":"assistant","uuid":"wf-line-5","message":{"role":"assistant","id":"msg_a2","content":[{"type":"text","text":"A2 from the transcript"}]}}\n',
+          '{"type":"assistant","uuid":"wf-line-5","message":{"role":"assistant","stop_reason":"end_turn","id":"msg_a2","content":[{"type":"text","text":"A2 from the transcript"}]}}\n',
         );
         yield* harness.offerAndWait(
           workflowSnapshot({ uuid: "00000000-0000-4000-8000-000000001016", state: "done" }),
@@ -13707,8 +13707,8 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         NodeFS.writeFileSync(
           NodePath.join(harness.transcriptDir, "agent-a1.jsonl"),
           [
-            '{"type":"assistant","uuid":"wf-line-6","message":{"role":"assistant","id":"msg_first","content":[{"type":"text","text":"First answer"}]}}',
-            '{"type":"assistant","uuid":"wf-line-7","message":{"role":"assistant","id":"msg_second","content":[{"type":"text","text":"Second answer"}]}}',
+            '{"type":"assistant","uuid":"wf-line-6","message":{"role":"assistant","stop_reason":"end_turn","id":"msg_first","content":[{"type":"text","text":"First answer"}]}}',
+            '{"type":"assistant","uuid":"wf-line-7","message":{"role":"assistant","stop_reason":"end_turn","id":"msg_second","content":[{"type":"text","text":"Second answer"}]}}',
           ].join("\n") + "\n",
         );
         yield* harness.offerAndWait(
@@ -13749,7 +13749,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         );
         NodeFS.writeFileSync(
           NodePath.join(harness.transcriptDir, "agent-a1.jsonl"),
-          '{"type":"assistant","uuid":"wf-line-8","message":{"role":"assistant","id":"msg_retry","content":[{"type":"text","text":"A1 retry answer"}]}}\n',
+          '{"type":"assistant","uuid":"wf-line-8","message":{"role":"assistant","stop_reason":"end_turn","id":"msg_retry","content":[{"type":"text","text":"A1 retry answer"}]}}\n',
         );
         yield* Queue.offer(
           harness.sdkMessages,
@@ -14108,9 +14108,13 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     ),
   );
 
-  it.effect.each([{ earlyText: false }, { earlyText: true }] as const)(
-    "waits for a settled workflow member's reply to reach its transcript (text before it: $earlyText)",
-    ({ earlyText }) =>
+  it.effect.each([
+    { before: "nothing" },
+    { before: "text" },
+    { before: "a line without a stop reason" },
+  ] as const)(
+    "waits for a settled workflow member's reply to reach its transcript ($before before it)",
+    ({ before }) =>
       Effect.scoped(
         Effect.gen(function* () {
           // Claude Code flushes transcript lines every 100 ms, so a member's reply
@@ -14127,7 +14131,9 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                 `line-${agentId}-bash`,
                 `msg_${agentId}`,
                 [
-                  ...(earlyText ? [{ type: "text", text: `${agentId} lists the files.` }] : []),
+                  ...(before === "text"
+                    ? [{ type: "text", text: `${agentId} lists the files.` }]
+                    : []),
                   {
                     type: "tool_use",
                     id: `toolu_${agentId}`,
@@ -14136,8 +14142,16 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                   },
                 ],
                 "tool_use",
-              ) + memberToolResultLine(`line-${agentId}-result`, `toolu_${agentId}`, "README.md");
-            const early = (agentId: string) => (earlyText ? [`${agentId} lists the files.`] : []);
+              ) +
+              memberToolResultLine(`line-${agentId}-result`, `toolu_${agentId}`, "README.md") +
+              // A line from a writer that leaves the field out entirely.
+              (before === "a line without a stop reason"
+                ? memberAssistantLine(`line-${agentId}-thinking`, `msg_${agentId}_reply`, [
+                    { type: "thinking", thinking: "Summarize the file.", signature: "sig" },
+                  ])
+                : "");
+            const early = (agentId: string) =>
+              before === "text" ? [`${agentId} lists the files.`] : [];
             const reply = (agentId: string) =>
               memberAssistantLine(
                 `line-${agentId}-reply`,

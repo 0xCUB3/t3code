@@ -3077,12 +3077,13 @@ interface ClaudeSubagentProjectionTarget {
  * Whether a transcript line ends the assistant's turn. Claude Code writes each
  * block of a message as its own line, `stop_reason: null` on all but the last,
  * and text before a tool call (`tool_use`) is not the reply. A line without the
- * field is from a writer we don't know, and doesn't hold the turn open.
+ * field (no CLI writes one) keeps the turn open: waiting costs at most the flush
+ * window, while ending the turn early can lose the reply.
  */
 function isClaudeTranscriptTurnEnd(entry: unknown): boolean {
   if (field(entry, "type") !== "assistant") return false;
   const stopReason = field(field(entry, "message"), "stop_reason");
-  return stopReason !== "tool_use" && stopReason !== null;
+  return typeof stopReason === "string" && stopReason !== "tool_use";
 }
 
 function isClaudeTranscriptConversationLine(
