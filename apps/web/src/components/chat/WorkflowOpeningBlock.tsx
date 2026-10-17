@@ -35,7 +35,7 @@ export function WorkflowOpeningBlock(props: {
           ) : null}
         </div>
         {headline.agents ? (
-          <span className="shrink-0 text-2xs tabular-nums text-muted-foreground">
+          <span aria-live="polite" className="shrink-0 text-2xs tabular-nums text-muted-foreground">
             {headline.agents}
           </span>
         ) : null}

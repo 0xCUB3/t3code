@@ -295,8 +295,8 @@ export function deriveWorkflowGroups(
 const WORKFLOW_SCRIPT_START = /^\s*(?:(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/)\s*)*export\s+const\s+meta\b/;
 
 /**
- * Whether a user message is the script a provider-native workflow runs. Servers mark it; threads
- * recorded before the mark still carry the raw script.
+ * Whether a user message is the script a provider-native workflow runs. Servers mark every
+ * subagent prompt either way; only threads recorded before the mark fall back to the text.
  */
 export function isWorkflowScriptMessage(message: {
   readonly role: string;
@@ -304,8 +304,7 @@ export function isWorkflowScriptMessage(message: {
   readonly workflowScript?: boolean | undefined;
 }): boolean {
   return (
-    message.role === "user" &&
-    (message.workflowScript === true || WORKFLOW_SCRIPT_START.test(message.text))
+    message.role === "user" && (message.workflowScript ?? WORKFLOW_SCRIPT_START.test(message.text))
   );
 }
 
@@ -344,6 +343,7 @@ export function resolveWorkflowOpening(input: {
   const coordinator = input.parentSubagents?.find(
     (subagent) => subagent.childThreadId === input.thread.id,
   );
+  if (first.workflowScript === false) return null;
   if (coordinator?.workflow === undefined && !isWorkflowScriptMessage(first)) return null;
   return {
     messageId: first.id,

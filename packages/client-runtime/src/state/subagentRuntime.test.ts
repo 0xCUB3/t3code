@@ -323,6 +323,20 @@ describe("resolveWorkflowOpening", () => {
     expect(isWorkflowScriptMessage({ role: "assistant", text: SCRIPT })).toBe(false);
   });
 
+  it("trusts a brief marked as not a script even when its text looks like one", () => {
+    expect(isWorkflowScriptMessage(brief(SCRIPT, false))).toBe(false);
+    expect(
+      resolveWorkflowOpening({
+        thread: childThread,
+        messages: [brief(SCRIPT, false)],
+        parentSubagents: [coordinator()],
+      }),
+    ).toBeNull();
+    expect(
+      workflowOpeningParentThreadId({ thread: childThread, messages: [brief(SCRIPT, false)] }),
+    ).toBeNull();
+  });
+
   it("loads the parent only for a thread that opens with a workflow script", () => {
     expect(
       workflowOpeningParentThreadId({ thread: childThread, messages: [brief(SCRIPT, true)] }),

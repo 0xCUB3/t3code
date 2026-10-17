@@ -11726,22 +11726,23 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           );
           return {
             text: message?.text,
-            messageMarked: message?.workflowScript === true,
-            itemMarked:
-              turnItem?.type === "turn_item.updated" &&
-              turnItem.turnItem.type === "user_message" &&
-              turnItem.turnItem.workflowScript === true,
+            messageMark: message?.workflowScript,
+            itemMark:
+              turnItem?.type === "turn_item.updated" && turnItem.turnItem.type === "user_message"
+                ? turnItem.turnItem.workflowScript
+                : undefined,
           };
         };
         assert.deepEqual(subagentPrompt(WORKFLOW_TASK_ID), {
           text: script,
-          messageMarked: true,
-          itemMarked: true,
+          messageMark: true,
+          itemMark: true,
         });
+        // A brief is marked as not a script, so its text is never read as one.
         assert.deepEqual(subagentPrompt("task-plain-auditor"), {
           text: "Audit the last five commits.",
-          messageMarked: false,
-          itemMarked: false,
+          messageMark: false,
+          itemMark: false,
         });
       }).pipe(
         Effect.provide(
