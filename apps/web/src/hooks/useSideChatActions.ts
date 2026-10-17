@@ -208,11 +208,9 @@ export function useSideChatActions(parentRef: ScopedThreadRef | null) {
       // A second press while the first fork is in flight would create a second side chat.
       if (startingSideChatFor.has(parentKey)) return null;
       startingSideChatFor.add(parentKey);
-      try {
-        return await startSideChat(parentRef, projection.thread, input);
-      } finally {
-        startingSideChatFor.delete(parentKey);
-      }
+      return startSideChat(parentRef, projection.thread, input).finally(() =>
+        startingSideChatFor.delete(parentKey),
+      );
     },
   );
 

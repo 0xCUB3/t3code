@@ -48,11 +48,7 @@ export function SideChatsSection(props: { environmentId: EnvironmentId; threadId
     if (starting) return;
     setStarting(true);
     actions.rememberHistoryChoice(history);
-    try {
-      await actions.start({ history });
-    } finally {
-      setStarting(false);
-    }
+    await actions.start({ history }).finally(() => setStarting(false));
   };
   const openIds = new Set(
     (openSurfaces ?? []).flatMap((surface) => (surface.kind === "aside" ? [surface.threadId] : [])),

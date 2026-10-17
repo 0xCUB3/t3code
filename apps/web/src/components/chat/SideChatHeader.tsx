@@ -53,11 +53,9 @@ export function SideChatHeader(props: { environmentId: EnvironmentId; threadId: 
   const run = async (action: () => Promise<unknown>) => {
     if (busy) return;
     setBusy(true);
-    try {
-      await action();
-    } finally {
-      setBusy(false);
-    }
+    await Promise.resolve()
+      .then(action)
+      .finally(() => setBusy(false));
   };
 
   return (
