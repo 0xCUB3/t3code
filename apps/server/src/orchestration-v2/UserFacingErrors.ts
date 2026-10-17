@@ -1,4 +1,8 @@
-import { PROVIDER_DISPLAY_NAMES, type ProviderDriverKind } from "@t3tools/contracts";
+import {
+  type OrchestrationV2DispatchRejectionReason,
+  PROVIDER_DISPLAY_NAMES,
+  type ProviderDriverKind,
+} from "@t3tools/contracts";
 import * as Predicate from "effect/Predicate";
 
 const GENERIC_ERROR_PREFIXES = [
@@ -93,6 +97,17 @@ function collectErrorMessages(value: unknown, seen: Set<unknown>): ReadonlyArray
   ];
 
   return message === undefined ? nested : [message, ...nested];
+}
+
+/** The first rejection reason in the cause chain, for clients that act on it. */
+export function dispatchRejectionReason(
+  value: unknown,
+  seen: Set<unknown> = new Set(),
+): OrchestrationV2DispatchRejectionReason | undefined {
+  if (!Predicate.isObject(value) || seen.has(value)) return undefined;
+  seen.add(value);
+  if (value.reason === "thread_not_empty") return value.reason;
+  return dispatchRejectionReason(value.cause, seen) ?? dispatchRejectionReason(value.error, seen);
 }
 
 export function userFacingDispatchErrorMessage(cause: unknown): string | undefined {

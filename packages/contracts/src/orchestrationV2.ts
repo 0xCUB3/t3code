@@ -3327,6 +3327,14 @@ export const OrchestrationV2ThreadStreamItem = Schema.Union([
 ]);
 export type OrchestrationV2ThreadStreamItem = typeof OrchestrationV2ThreadStreamItem.Type;
 
+/**
+ * Why a command was refused, where a client acts on it. `thread_not_empty`: a
+ * delete sent with `expectedEmpty` found messages or runs, so the thread stays.
+ */
+export const OrchestrationV2DispatchRejectionReason = Schema.Literal("thread_not_empty");
+export type OrchestrationV2DispatchRejectionReason =
+  typeof OrchestrationV2DispatchRejectionReason.Type;
+
 export class OrchestrationV2DispatchCommandError extends Schema.TaggedError<OrchestrationV2DispatchCommandError>()(
   "OrchestrationV2DispatchCommandError",
   {
@@ -3334,6 +3342,7 @@ export class OrchestrationV2DispatchCommandError extends Schema.TaggedError<Orch
     commandType: Schema.String,
     message: Schema.String,
     detail: Schema.optional(Schema.String),
+    reason: Schema.optional(OrchestrationV2DispatchRejectionReason),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {}

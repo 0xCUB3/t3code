@@ -5,6 +5,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import { resolveSideChatHistoryAvailability } from "@t3tools/client-runtime/state/thread-workflows";
 import type { RunId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import { wasThreadNotEmpty } from "@t3tools/client-runtime/errors";
 
 import { useComposerDraftStore } from "../composerDraftStore";
 import { newMessageId, newThreadId } from "../lib/utils";
@@ -174,8 +175,12 @@ export function useSideChatActions(parentRef: ScopedThreadRef | null) {
         },
       });
       if (sent._tag === "Failure") {
-        // Keep the question in the side chat so it can be sent again.
-        useComposerDraftStore.getState().setPrompt(childRef, `${quote}${question}`);
+        // Keep the question in the side chat so it can be sent again, unless
+        // the user has already typed something else there.
+        const draftStore = useComposerDraftStore.getState();
+        if ((draftStore.getComposerDraft(childRef)?.prompt ?? "") === "") {
+          draftStore.setPrompt(childRef, `${quote}${question}`);
+        }
         if (!isAtomCommandInterrupted(sent)) {
           reportFailure("Could not send the question", squashAtomCommandFailure(sent));
         }
@@ -188,6 +193,14 @@ export function useSideChatActions(parentRef: ScopedThreadRef | null) {
 
   // Stable, and reads the projection at call time: depending on it would replace
   // `start` (and the timeline callbacks built on it) on every streamed update.
+  /** Whether `start` would try now; false while another start for this thread is in flight. */
+  const canStart = useStableCallback(
+    (): boolean =>
+      parentRef !== null &&
+      projection !== null &&
+      supported &&
+      !startingSideChatFor.has(scopedThreadKey(parentRef)),
+  );
   const start = useStableCallback(
     async (input: StartSideChatInput): Promise<ScopedThreadRef | null> => {
       if (parentRef === null || projection === null || !supported) return null;
@@ -269,10 +282,15 @@ export function useSideChatActions(parentRef: ScopedThreadRef | null) {
     if (parentRef === null || shell === undefined || !isEmptySideChat(shell)) return;
     // This client's copy can lag a question that already landed, so the
     // server deletes only if the thread is still empty. If not, it stays listed.
-    await deleteThread({
+    const result = await deleteThread({
       environmentId: parentRef.environmentId,
       input: { threadId: childThreadId, expectedEmpty: true },
     });
+    if (result._tag === "Success" || isAtomCommandInterrupted(result)) return;
+    const error = squashAtomCommandFailure(result);
+    // A message landed first, so the server kept it: expected, not a failure.
+    if (wasThreadNotEmpty(error)) return;
+    reportFailure("Could not discard the empty side chat", error);
   });
 
   /** Clears the flag, so the thread joins the sidebar as an ordinary one. */
@@ -315,6 +333,7 @@ export function useSideChatActions(parentRef: ScopedThreadRef | null) {
   return {
     supported,
     historyAvailability,
+    canStart,
     start,
     run,
     defaultHistory,

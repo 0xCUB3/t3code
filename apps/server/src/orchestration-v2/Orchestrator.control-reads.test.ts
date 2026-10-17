@@ -28,6 +28,7 @@ import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as DelegatedTaskQuestionReactor from "./DelegatedTaskQuestionReactor.ts";
 import * as EventSink from "./EventSink.ts";
 import * as Orchestrator from "./Orchestrator.ts";
+import { dispatchRejectionReason } from "./UserFacingErrors.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as ProviderReplayHarness from "./testkit/ProviderReplayHarness.ts";
@@ -814,6 +815,7 @@ it.effect("forks a side chat from the last finished run while the source is mid-
       }),
     );
     assert.equal(notEmpty._tag, "OrchestratorDispatchError");
+    assert.equal(dispatchRejectionReason(notEmpty), "thread_not_empty");
     assert.isNull((yield* projections.getThread(sourceId)).deletedAt);
   }).pipe(Effect.provide(layerTest)),
 );

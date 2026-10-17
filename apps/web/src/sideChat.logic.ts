@@ -1,4 +1,7 @@
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+import {
+  type EnvironmentThreadShell,
+  threadRuntimeIsActive,
+} from "@t3tools/client-runtime/state/models";
 import type { RuntimeSubagent } from "@t3tools/client-runtime/state/subagentRuntime";
 import type { KeybindingCommand, ThreadId } from "@t3tools/contracts";
 
@@ -16,6 +19,7 @@ type SideChatShell = Pick<
   | "deletedAt"
   | "createdAt"
   | "latestRun"
+  | "runtime"
   | "itemCount"
 >;
 
@@ -35,18 +39,41 @@ export function sideChatsOf<T extends SideChatShell>(
     .toSorted((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
 }
 
-const SETTLED_RUN_STATUSES = new Set(["completed", "failed", "interrupted", "cancelled"]);
+const SETTLED_RUN_STATUSES = new Set([
+  "completed",
+  "failed",
+  "interrupted",
+  "cancelled",
+  "rolled_back",
+]);
 
-/** A side chat is "previous" once nothing is running in it, like a finished subagent. */
-export function isPreviousSideChat(thread: Pick<SideChatShell, "latestRun">): boolean {
+/**
+ * A side chat is "previous" once nothing is running in it, like a finished
+ * subagent. The live runtime decides first: a cancelled queued follow-up is the
+ * latest run while an older one may still be working.
+ */
+export function isPreviousSideChat(thread: Pick<SideChatShell, "latestRun" | "runtime">): boolean {
+  if (threadRuntimeIsActive(thread.runtime)) return false;
   return thread.latestRun === null || SETTLED_RUN_STATUSES.has(thread.latestRun.status);
 }
 
-/** Shapes a side chat's latest run for `AgentElapsed`, the timer subagent rows use. */
+/** Shapes a side chat's current or latest run for `AgentElapsed`, the timer subagent rows use. */
 export function sideChatActivity(
-  thread: Pick<SideChatShell, "latestRun">,
+  thread: Pick<SideChatShell, "latestRun" | "runtime">,
 ): Pick<RuntimeSubagent, "status" | "startedAt" | "completedAt"> {
   const run = thread.latestRun;
+  const runtime = thread.runtime;
+  if (runtime !== null && threadRuntimeIsActive(runtime)) {
+    return {
+      status: runtime.status === "waiting" ? "waiting" : "running",
+      startedAt:
+        runtime.activityStartedAt ??
+        (run !== null && !SETTLED_RUN_STATUSES.has(run.status)
+          ? (run.startedAt ?? run.requestedAt)
+          : null),
+      completedAt: null,
+    };
+  }
   if (run === null) return { status: "idle", startedAt: null, completedAt: null };
   const status: RuntimeSubagent["status"] = SETTLED_RUN_STATUSES.has(run.status)
     ? run.status === "completed"

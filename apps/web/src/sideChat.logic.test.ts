@@ -72,6 +72,27 @@ describe("side chat logic", () => {
     });
   });
 
+  it("files a rolled back side chat under previous", () => {
+    const rolledBack = shell("rolled-back", {
+      latestRun: { status: "rolled_back", requestedAt: "a", startedAt: "b", completedAt: "c" },
+    });
+    expect(isPreviousSideChat(rolledBack)).toBe(true);
+    expect(sideChatActivity(rolledBack).status).toBe("interrupted");
+  });
+
+  it("keeps a side chat running while an older run works behind a cancelled follow-up", () => {
+    const busy = shell("busy", {
+      latestRun: { status: "cancelled", requestedAt: "q", startedAt: null, completedAt: "c" },
+      runtime: { status: "running", activeRunId: "run-1", activityStartedAt: "b" },
+    });
+    expect(isPreviousSideChat(busy)).toBe(false);
+    expect(sideChatActivity(busy)).toEqual({
+      status: "running",
+      startedAt: "b",
+      completedAt: null,
+    });
+  });
+
   it("discards a side chat on close only while it has no messages", () => {
     expect(isEmptySideChat(shell("empty"))).toBe(true);
     expect(isEmptySideChat(shell("typed", { itemCount: 2 }))).toBe(false);

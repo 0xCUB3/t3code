@@ -4547,7 +4547,10 @@ export default function ChatView(props: ChatViewProps) {
         frame = window.requestAnimationFrame(() => {
           frame = null;
           if (document.querySelector("[data-mcp-app-fullscreen]") !== null) return;
-          if (shouldRefocusComposerOnWindowFocus(document.activeElement)) focusComposerStable();
+          if (!shouldRefocusComposerOnWindowFocus(document.activeElement)) return;
+          // A side chat with this thread's composer gets the keyboard back instead.
+          if (focusedSideChatId !== null) sideComposerRef.current?.focusAtEnd();
+          else focusComposerStable();
         });
       });
     };
@@ -4560,7 +4563,9 @@ export default function ChatView(props: ChatViewProps) {
     activeThread?.id,
     embedded,
     focusComposerStable,
+    focusedSideChatId,
     isMobileViewport,
+    sideComposerRef,
     terminalUiState.terminalOpen,
   ]);
 
@@ -8248,7 +8253,9 @@ export default function ChatView(props: ChatViewProps) {
                             replyBar: (
                               <SideChatReplyBar
                                 needsAnswer={
-                                  pendingApprovals.length > 0 || pendingUserInputs.length > 0
+                                  pendingApprovals.length > 0 ||
+                                  pendingUserInputs.length > 0 ||
+                                  activeThreadShell?.hasPendingUserInput === true
                                 }
                                 onReply={sideChatGuest.focus}
                               />

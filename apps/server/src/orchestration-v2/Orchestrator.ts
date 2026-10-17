@@ -20,6 +20,7 @@ import {
   ORCHESTRATION_V2_WORKSPACE_PREPARATION_FAILURE_CODE,
   type ChatAttachment,
   CommandId,
+  OrchestrationV2DispatchRejectionReason,
   isProviderNativeSubagentThread,
   MessageId,
   type NodeId,
@@ -150,6 +151,7 @@ export class OrchestratorDispatchError extends Schema.TaggedError<OrchestratorDi
   {
     commandId: CommandId,
     commandType: Schema.String,
+    reason: Schema.optional(OrchestrationV2DispatchRejectionReason),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
@@ -10744,6 +10746,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             return yield* new OrchestratorDispatchError({
               commandId: command.commandId,
               commandType: command.type,
+              reason: "thread_not_empty",
               cause: `Thread ${command.threadId} is no longer empty.`,
             });
           }

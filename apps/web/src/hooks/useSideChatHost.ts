@@ -55,7 +55,9 @@ export function useSideChatHost(input: {
     },
   );
   const defaultHistory = actions.defaultHistory;
+  // False keeps the selection for a retry while another side chat is still starting.
   const onAskAssistantText = useStableCallback((citation: AssistantCitation) => {
+    if (!actions.canStart()) return false;
     void start({ history: defaultHistory, quote: citation.text });
     return true;
   });
