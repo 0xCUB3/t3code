@@ -104,7 +104,9 @@ export const readContainedWorkflowFile = Effect.fn("orchestration.readContainedW
             const consumed = lineEnd === 0 && bytesRead === input.byteCap ? bytesRead : lineEnd;
             return {
               contents: read.subarray(0, lineEnd).toString("utf8"),
-              truncated: start + consumed < stat.size,
+              // Only the cap can leave complete lines unread; a half-written
+              // last line is not truncation.
+              truncated: stat.size - start > input.byteCap,
               startOffset: start,
               endOffset: start + consumed,
               identity,

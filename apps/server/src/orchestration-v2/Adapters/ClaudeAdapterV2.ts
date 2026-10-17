@@ -4699,28 +4699,42 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             let textShown = !restarted && previous?.textShown === true;
             let resultShown = !restarted && previous?.resultShown === true;
             let transcriptRead = false;
-            if ((readTranscript || readLiveTranscript) && agentId !== undefined) {
-              const read = yield* readWorkflowAgentTranscript({
-                transcriptDir,
-                agentId,
-                cursor: transcriptCursor,
-                ...(adapterOptions.environment.CLAUDE_CONFIG_DIR === undefined
-                  ? {}
-                  : {
-                      configDir: path.resolve(
-                        session.cwd,
-                        adapterOptions.environment.CLAUDE_CONFIG_DIR,
-                      ),
-                    }),
-              }).pipe(Effect.option);
-              if ((yield* Ref.get(sessionSubagentsByTaskId)).get(taskId) !== input.coordinator)
-                return;
-              if (Option.isSome(read)) {
+            // Each read is capped, so keep reading until the transcript has no
+            // more complete lines; a settled member's answer may be past the cap.
+            let transcriptDrained = true;
+            if (
+              (readTranscript || readLiveTranscript) &&
+              transcriptDir !== undefined &&
+              agentId !== undefined
+            ) {
+              const readNext = (cursor: WorkflowAgentTranscriptCursor) =>
+                readWorkflowAgentTranscript({
+                  transcriptDir,
+                  agentId,
+                  cursor,
+                  ...(adapterOptions.environment.CLAUDE_CONFIG_DIR === undefined
+                    ? {}
+                    : {
+                        configDir: path.resolve(
+                          session.cwd,
+                          adapterOptions.environment.CLAUDE_CONFIG_DIR,
+                        ),
+                      }),
+                }).pipe(Effect.option);
+              transcriptDrained = false;
+              while (!transcriptDrained) {
+                const read = yield* readNext(transcriptCursor);
+                if ((yield* Ref.get(sessionSubagentsByTaskId)).get(taskId) !== input.coordinator)
+                  return;
+                if (Option.isNone(read)) break;
                 transcriptRead = true;
+                const advanced = read.value.cursor.offset !== transcriptCursor.offset;
                 transcriptCursor = read.value.cursor;
                 for (const line of read.value.lines) {
                   if (yield* projectSubagentTranscriptLine(target, line)) textShown = true;
                 }
+                // A line longer than the cap can't advance; stop rather than spin.
+                transcriptDrained = !read.value.truncated || !advanced;
               }
             }
             if (settled) {
@@ -4758,6 +4772,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                   (!restarted && previous?.finalTranscriptRead === true) ||
                   (readTranscript &&
                     transcriptRead &&
+                    transcriptDrained &&
                     textShown &&
                     input.coordinator.task.status !== "running"),
                 transcriptCursor,
