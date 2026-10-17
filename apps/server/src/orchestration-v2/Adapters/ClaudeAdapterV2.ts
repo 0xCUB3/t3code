@@ -3073,6 +3073,18 @@ interface ClaudeSubagentProjectionTarget {
   readonly toolCalls: Map<string, ActiveClaudeToolCall>;
 }
 
+/**
+ * Whether a transcript line ends the assistant's turn. Claude Code writes each
+ * block of a message as its own line, `stop_reason: null` on all but the last,
+ * and text before a tool call (`tool_use`) is not the reply. A line without the
+ * field is from a writer we don't know, and doesn't hold the turn open.
+ */
+function isClaudeTranscriptTurnEnd(entry: unknown): boolean {
+  if (field(entry, "type") !== "assistant") return false;
+  const stopReason = field(field(entry, "message"), "stop_reason");
+  return stopReason !== "tool_use" && stopReason !== null;
+}
+
 function isClaudeTranscriptConversationLine(
   entry: unknown,
 ): entry is SDKAssistantMessage | SDKUserMessage {
@@ -3450,6 +3462,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               readonly nextItemOrdinal: number;
               readonly toolCalls: Map<string, ActiveClaudeToolCall>;
               readonly textShown: boolean;
+              // The transcript reached the end of the member's last turn.
+              readonly turnEnded: boolean;
               readonly resultShown: boolean;
               readonly result: string | undefined;
               readonly label: string;
@@ -4702,9 +4716,11 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 : previous.transcriptCursor;
             let textShown = !restarted && previous?.textShown === true;
             let resultShown = !restarted && previous?.resultShown === true;
+            let turnEnded = !restarted && previous?.turnEnded === true;
             let transcriptRead = false;
             let lastReadAt = now;
-            const awaitingReply = () => settled && transcriptRead && !textShown && !resultShown;
+            // Text before a tool call is not the reply, so wait for the turn's end.
+            const awaitingReply = () => settled && transcriptRead && !turnEnded && !resultShown;
             // Milliseconds until a read started at `at` sees every line the
             // member wrote before it settled.
             const flushWindowLeft = (at: DateTime.Utc) =>
@@ -4748,6 +4764,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                   transcriptCursor = read.value.cursor;
                   for (const line of read.value.lines) {
                     if (yield* projectSubagentTranscriptLine(target, line)) textShown = true;
+                    // A later line (a retry, or a resumed member) reopens the turn.
+                    turnEnded = isClaudeTranscriptTurnEnd(line);
                   }
                   // A line longer than the cap can't advance; stop rather than spin.
                   transcriptDrained = !read.value.truncated || !advanced;
@@ -4816,6 +4834,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 nextItemOrdinal,
                 toolCalls,
                 textShown,
+                turnEnded,
                 resultShown,
                 createdAt,
                 startedAt,
