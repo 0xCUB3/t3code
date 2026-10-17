@@ -121,7 +121,7 @@ export function parseSideCommand(prompt: string): ParsedSideCommand | null {
 }
 
 /** Panel layout and Find shortcuts the host thread still handles while a side chat has focus. */
-export const SIDE_CHAT_PASSTHROUGH_COMMANDS: ReadonlySet<KeybindingCommand> = new Set([
+const SIDE_CHAT_PASSTHROUGH_COMMANDS: ReadonlySet<KeybindingCommand> = new Set([
   "chat.find",
   "rightPanel.close",
   "rightPanel.toggle",
