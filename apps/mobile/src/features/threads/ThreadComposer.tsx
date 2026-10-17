@@ -1053,7 +1053,11 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                         paddingVertical: 4,
                       }
                     : {
-                        height: INLINE_EDITOR_HEIGHT,
+                        // Large text sizes need room for one full line plus the iOS inset.
+                        height: Math.max(
+                          INLINE_EDITOR_HEIGHT,
+                          Math.ceil(lineHeight) + (Platform.OS === "android" ? 0 : 12),
+                        ),
                       }
                 }
                 textStyle={{
