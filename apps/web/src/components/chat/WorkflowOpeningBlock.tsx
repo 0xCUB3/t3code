@@ -5,10 +5,11 @@ import {
 } from "@t3tools/client-runtime/state/subagentRuntime";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { WorkflowIcon } from "lucide-react";
-import { useState } from "react";
+import { use, useState } from "react";
 
 import { providersIgnoringCheckedAtAtom } from "../../state/server";
 import { CollapsibleSectionHeader } from "../ui/collapsible-section-header";
+import { findRevealRef, MarkdownFindContext } from "./markdownFindContext";
 import { WorkflowPhaseList } from "./ThreadLineageWorkflowRow";
 
 /** Opens a workflow coordinator's thread in place of its script: the plan, then the script on demand. */
@@ -18,6 +19,10 @@ export function WorkflowOpeningBlock(props: {
   readonly onOpenThread: (threadId: string) => void;
 }) {
   const [scriptOpen, setScriptOpen] = useState(false);
+  // While finding, the closed script stays mounted (hidden) so a match in it can
+  // be counted, and opens once that match is selected.
+  const searching = use(MarkdownFindContext);
+  const revealRef = findRevealRef(() => setScriptOpen(true));
   const { opening } = props;
   const providers = useAtomValue(providersIgnoringCheckedAtAtom(props.environmentId));
   const headline = workflowOpeningHeadline(opening);
@@ -32,9 +37,13 @@ export function WorkflowOpeningBlock(props: {
         <WorkflowIcon aria-hidden className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <p className="text-2xs font-medium text-muted-foreground">Workflow started</p>
-          <h3 className="truncate text-sm font-medium text-foreground">{headline.title}</h3>
+          <h3 className="truncate text-sm font-medium text-foreground" data-thread-find-text="true">
+            {headline.title}
+          </h3>
           {headline.description ? (
-            <p className="text-xs text-muted-foreground">{headline.description}</p>
+            <p className="text-xs text-muted-foreground" data-thread-find-text="true">
+              {headline.description}
+            </p>
           ) : null}
         </div>
         {headline.agents ? (
@@ -62,8 +71,13 @@ export function WorkflowOpeningBlock(props: {
         >
           View script
         </CollapsibleSectionHeader>
-        {scriptOpen ? (
-          <pre className="mt-1 max-h-96 overflow-auto rounded-lg bg-muted/40 p-3 font-mono text-2xs whitespace-pre text-foreground/90">
+        {scriptOpen || searching ? (
+          <pre
+            ref={revealRef}
+            hidden={!scriptOpen}
+            className="mt-1 max-h-96 overflow-auto rounded-lg bg-muted/40 p-3 font-mono text-2xs whitespace-pre text-foreground/90"
+            data-thread-find-text="true"
+          >
             {opening.script}
           </pre>
         ) : null}
