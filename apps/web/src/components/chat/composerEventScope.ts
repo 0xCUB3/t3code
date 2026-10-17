@@ -61,12 +61,17 @@ export function chatViewOf(target: EventTarget | null): string | null {
 }
 
 /**
- * Whether `target` belongs to the same chat view as `own`. A side chat renders
- * a second chat view inside the host's, so window-level composer shortcuts
- * check this to act on one composer only.
+ * Whether a window-level composer shortcut from `target` is for the composer
+ * containing `own`. A side chat renders a second chat view inside the host's,
+ * so only one composer may act. A key pressed in a side chat goes to its
+ * composer; one pressed anywhere else goes to the composer on screen, which is
+ * the side chat's while it has the host's composer (the host's is hidden then).
  */
-export function isInSameChatView(target: EventTarget | null, own: Element | null): boolean {
-  return chatViewOf(target) === chatIdOf(own?.closest(EMBEDDED_CHAT_SELECTOR) ?? null);
+export function composerTakesShortcut(target: EventTarget | null, own: Element | null): boolean {
+  if (own === null) return false;
+  const targetChat = chatViewOf(target);
+  if (targetChat !== null) return targetChat === chatIdOf(own.closest(EMBEDDED_CHAT_SELECTOR));
+  return own.closest("[hidden]") === null;
 }
 
 export function isInsideComposerFloatingLayer(target: EventTarget | null): boolean {

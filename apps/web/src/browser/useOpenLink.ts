@@ -4,6 +4,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { recordVisitForThread } from "~/browserHistoryStore";
+import { panelOwnerOf } from "~/rightPanelStore";
 import { readLocalApi } from "~/localApi";
 import { previewEnvironment } from "~/state/preview";
 import { readEnvironmentScope } from "~/state/session";
@@ -35,7 +36,10 @@ export function useOpenLink(threadRef: ScopedThreadRef | null | undefined): (
 ) => Promise<void> {
   const openPreview = useAtomCommand(previewEnvironment.open, { reportFailure: false });
   return async (url, options = {}) => {
-    const targetThreadRef = options.threadRef ?? threadRef;
+    const linkThreadRef = options.threadRef ?? threadRef;
+    // A side chat has no panel of its own while embedded, so its links open in
+    // its host's browser, where they can be seen.
+    const targetThreadRef = linkThreadRef ? panelOwnerOf(linkThreadRef) : linkThreadRef;
     const target = resolveLinkTarget({
       url,
       event: options.event ?? NO_MODIFIER,

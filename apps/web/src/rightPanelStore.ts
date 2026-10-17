@@ -271,7 +271,8 @@ export function registerEmbeddedPanelHost(
   };
 }
 
-function panelOwnerOf(ref: ScopedThreadRef): ScopedThreadRef {
+/** The thread whose right panel shows what `ref` opens: its embedding host, or itself. */
+export function panelOwnerOf(ref: ScopedThreadRef): ScopedThreadRef {
   return embeddedPanelHosts.get(scopedThreadKey(ref)) ?? ref;
 }
 
@@ -705,7 +706,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
         ),
       openPullRequest: (ref, target) =>
         set((state) =>
-          userAction(state, scopedThreadKey(ref), (current) => {
+          userAction(state, scopedThreadKey(panelOwnerOf(ref)), (current) => {
             const surface = pullRequestSurface(target);
             const next = upsertSurface(current, surface);
             return target.url

@@ -3936,12 +3936,15 @@ export default function ChatView(props: ChatViewProps) {
     );
   };
   const copyRightPanelFilePathStable = useStableCallback(copyRightPanelFilePath);
+  // A global action: only the host answers it, so one press opens one browser.
   useEffect(
     () =>
-      subscribePreviewAction((action) => {
-        if (action === "toggle-panel") togglePreviewPanelStable();
-      }),
-    [togglePreviewPanelStable],
+      embedded
+        ? undefined
+        : subscribePreviewAction((action) => {
+            if (action === "toggle-panel") togglePreviewPanelStable();
+          }),
+    [embedded, togglePreviewPanelStable],
   );
   const persistThreadSettingsForNextTurn = async (input: {
     threadId: ThreadId;
@@ -7791,13 +7794,16 @@ export default function ChatView(props: ChatViewProps) {
     pendingSidebarFileDrops,
   ]);
 
+  // Drops go to whichever composer this thread is talking through, like typing.
   const addDroppedFilesToComposer = useStableCallback(
     (files: Parameters<ChatComposerHandle["addDroppedFiles"]>[0]) =>
-      composerRef.current?.addDroppedFiles(files),
+      (focusedSideChatId !== null ? sideComposerRef : composerRef).current?.addDroppedFiles(files),
   );
   const addDroppedFoldersToComposer = useStableCallback(
     (folders: Parameters<ChatComposerHandle["addDroppedFolders"]>[0]) =>
-      composerRef.current?.addDroppedFolders(folders),
+      (focusedSideChatId !== null ? sideComposerRef : composerRef).current?.addDroppedFolders(
+        folders,
+      ),
   );
 
   if (!activeThread) {
@@ -8001,7 +8007,8 @@ export default function ChatView(props: ChatViewProps) {
             findOptions={{
               skills: timelineSkills,
               progressive: serverConfig?.threadFindProgressive === true,
-              thread: activeThreadRef,
+              // Without a thread, the embedded view ignores the global Find request.
+              thread: embedded ? null : activeThreadRef,
               // Find belongs to the host thread; a side chat has no find bar.
               enabled:
                 !embedded &&

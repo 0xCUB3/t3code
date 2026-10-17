@@ -5,6 +5,11 @@ import { type RefObject, useEffect } from "react";
 
 import type { ChatComposerHandle } from "../components/chat/ChatComposer";
 import type { ComposerBannerStackItem } from "../components/chat/ComposerBannerStack";
+import {
+  eventPathContainsSelector,
+  TYPE_TO_FOCUS_EDITABLE_SELECTOR,
+  TYPE_TO_FOCUS_FLOATING_LAYER_SELECTOR,
+} from "../components/chat/composerFocusRedirect";
 import { Button } from "../components/ui/button";
 import { useSideChatFocusStore } from "../sideChatStore";
 import { useThreadShell } from "../state/entities";
@@ -48,6 +53,22 @@ export function useSideChatGuest(input: {
     const frame = requestAnimationFrame(() => composerRef.current?.focusAtEnd());
     return () => cancelAnimationFrame(frame);
   }, [composerPlace, composerRef]);
+
+  // Escape goes back to main even after focus leaves the composer. This listens
+  // in the bubble phase, after the editor, menus and dialogs claim their own
+  // Escape, and leaves fields that use Escape themselves alone.
+  useEffect(() => {
+    if (!focused || parentKey === null) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
+      if (eventPathContainsSelector(event, TYPE_TO_FOCUS_EDITABLE_SELECTOR)) return;
+      if (document.querySelector(TYPE_TO_FOCUS_FLOATING_LAYER_SELECTOR)) return;
+      event.preventDefault();
+      useSideChatFocusStore.getState().release(parentKey, threadId);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [focused, parentKey, threadId]);
 
   // The parent's own questions stay one Escape away.
   const parentShell = useThreadShell(parentRef);

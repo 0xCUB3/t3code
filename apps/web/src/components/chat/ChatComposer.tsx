@@ -109,7 +109,7 @@ import {
   useComposerMenuProps,
   isInsideCollapsedComposerControls,
   isInsideRestingComposerControlScope,
-  isInSameChatView,
+  composerTakesShortcut,
 } from "./composerEventScope";
 import {
   type ComposerFileAttachment,
@@ -5355,8 +5355,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         },
       });
       if (command !== "composer.stash") return;
-      // A side chat mounts a second composer; only the one whose chat has focus stashes.
-      if (!isInSameChatView(event.target, composerFormRef.current)) return;
+      // A side chat mounts a second composer; only the one the key is meant for stashes.
+      if (!composerTakesShortcut(event.target, composerFormRef.current)) return;
       // Always claim the shortcut so the browser save dialog never opens,
       // even when the composer is in a state that can't stash.
       event.preventDefault();
