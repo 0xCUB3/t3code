@@ -40,20 +40,20 @@ beforeEach(() => {
   fontSize = 16;
   vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1800);
   vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(1000);
-  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
-    function (this: HTMLElement) {
-      if (this.hasAttribute("data-thread-find-bar")) {
-        const gap = 0.75 * fontSize;
-        return new DOMRect(
-          200 + 1800 - gap - 17.5 * fontSize,
-          100 + gap,
-          17.5 * fontSize,
-          2.25 * fontSize,
-        );
-      }
-      return new DOMRect(200, 100, 1800, 1000);
-    },
-  );
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    if (this.hasAttribute("data-thread-find-bar")) {
+      const gap = 0.75 * fontSize;
+      return new DOMRect(
+        200 + 1800 - gap - 17.5 * fontSize,
+        100 + gap,
+        17.5 * fontSize,
+        2.25 * fontSize,
+      );
+    }
+    return new DOMRect(200, 100, 1800, 1000);
+  });
   vi.spyOn(window, "getComputedStyle").mockReturnValue({
     paddingLeft: "48px",
     width: "736px",
