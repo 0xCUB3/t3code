@@ -1037,7 +1037,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                     ? sendPresentation.label
                     : FOLLOW_UP_ACTION_LABEL[sendPresentation.alternate]
                 }
-                scrollEnabled={usesCard}
+                scrollEnabled={isExpanded}
                 singleLineCentered={!usesCard}
                 contentInsetVertical={usesCard || Platform.OS === "android" ? 0 : 6}
                 onContentSizeChange={(size) => {
