@@ -1,7 +1,7 @@
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { ChevronDownIcon, MessageCircleIcon, PlusIcon, Trash2Icon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { useSideChatActions } from "../../hooks/useSideChatActions";
 import { useRightPanelStore } from "../../rightPanelStore";
@@ -22,21 +22,14 @@ import { ThreadRelationshipIcon } from "./ThreadRelationshipIcon";
  * inside it: a side chat is presentation, its relationship still shows there.
  */
 export function SideChatsSection(props: { environmentId: EnvironmentId; threadId: ThreadId }) {
-  const parentRef = useMemo(
-    () => scopeThreadRef(props.environmentId, props.threadId),
-    [props.environmentId, props.threadId],
-  );
+  const parentRef = scopeThreadRef(props.environmentId, props.threadId);
   const actions = useSideChatActions(parentRef);
   const shells = useThreadShells();
   const [previousExpanded, setPreviousExpanded] = useState(false);
   const [starting, setStarting] = useState(false);
-  const sideChats = useMemo(
-    () =>
-      sideChatsOf(
-        shells.filter((thread) => thread.environmentId === props.environmentId),
-        props.threadId,
-      ),
-    [props.environmentId, props.threadId, shells],
+  const sideChats = sideChatsOf(
+    shells.filter((thread) => thread.environmentId === props.environmentId),
+    props.threadId,
   );
   // A side chat open in the panel stays listed as active even when idle, so the
   // tab you are looking at is never hidden under a collapsed "Previous".

@@ -1,7 +1,7 @@
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import { MessageCircleQuestionIcon } from "lucide-react";
-import { type RefObject, useCallback, useEffect, useMemo } from "react";
+import { type RefObject, useEffect } from "react";
 
 import type { ChatComposerHandle } from "../components/chat/ChatComposer";
 import type { ComposerBannerStackItem } from "../components/chat/ComposerBannerStack";
@@ -33,12 +33,12 @@ export function useSideChatGuest(input: {
   const parentKey = parentRef === null ? null : scopedThreadKey(parentRef);
   const focused = sideChat?.focused === true;
 
-  const focus = useCallback(() => {
+  const focus = () => {
     if (parentKey !== null) useSideChatFocusStore.getState().focus(parentKey, threadId);
-  }, [parentKey, threadId]);
-  const release = useCallback(() => {
+  };
+  const release = () => {
     if (parentKey !== null) useSideChatFocusStore.getState().release(parentKey, threadId);
-  }, [parentKey, threadId]);
+  };
 
   // The composer remounts when it moves between the parent's slot and the panel
   // (maximizing), so it takes the keyboard on every move, not just on focus.
@@ -53,7 +53,7 @@ export function useSideChatGuest(input: {
   const parentShell = useThreadShell(parentRef);
   const parentAwaitingAnswer =
     parentShell?.hasPendingApprovals === true || parentShell?.hasPendingUserInput === true;
-  const bannerItems = useMemo<ComposerBannerStackItem[]>(() => {
+  const bannerItems = ((): ComposerBannerStackItem[] => {
     if (sideChat === undefined) return composerBannerItems;
     const sideItems: ComposerBannerStackItem[] = [];
     if (parentAwaitingAnswer) {
@@ -87,21 +87,18 @@ export function useSideChatGuest(input: {
       onDismiss: release,
     });
     return [...sideItems, ...composerBannerItems];
-  }, [composerBannerItems, parentAwaitingAnswer, release, sideChat]);
+  })();
 
-  const composerProps = useMemo(
-    () =>
-      sideChat === undefined
-        ? {}
-        : {
-            idlePlaceholder: "Ask on the side. Esc goes back to main",
-            onEscape: () => {
-              release();
-              return true;
-            },
+  const composerProps =
+    sideChat === undefined
+      ? {}
+      : {
+          idlePlaceholder: "Ask on the side. Esc goes back to main",
+          onEscape: () => {
+            release();
+            return true;
           },
-    [release, sideChat],
-  );
+        };
 
   return { focus, bannerItems, composerProps };
 }

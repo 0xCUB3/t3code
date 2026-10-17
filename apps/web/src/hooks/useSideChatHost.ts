@@ -1,11 +1,12 @@
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { AssistantCitation, RunId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
-import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
+import { type RefObject, useEffect, useRef, useState } from "react";
 
 import type { ChatComposerHandle } from "../components/chat/ChatComposer";
 import type { RightPanelSurface } from "../rightPanelStore";
 import { resolveFocusedSideChat, useSideChatFocusStore } from "../sideChatStore";
 import { useSideChatActions } from "./useSideChatActions";
+import { useStableCallback } from "./useStableCallback";
 
 /**
  * A thread's side of its side chats: the actions, which side chat its composer
@@ -47,21 +48,17 @@ export function useSideChatHost(input: {
 
   const start = actions.start;
   const threadId = threadRef?.threadId ?? null;
-  const onAskAboutResponse = useCallback(
+  const onAskAboutResponse = useStableCallback(
     async (target: { readonly sourceThreadId: ThreadId; readonly runId: RunId }) => {
       if (target.sourceThreadId !== threadId) return;
       await start({ history: "with", runId: target.runId });
     },
-    [start, threadId],
   );
   const defaultHistory = actions.defaultHistory;
-  const onAskAssistantText = useCallback(
-    (citation: AssistantCitation) => {
-      void start({ history: defaultHistory, quote: citation.text });
-      return true;
-    },
-    [defaultHistory, start],
-  );
+  const onAskAssistantText = useStableCallback((citation: AssistantCitation) => {
+    void start({ history: defaultHistory, quote: citation.text });
+    return true;
+  });
 
   return {
     actions,
