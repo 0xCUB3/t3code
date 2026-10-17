@@ -27,6 +27,7 @@ import {
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import { connectionStatusText } from "@t3tools/client-runtime/connection";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
+import { makeSideChatListingFilter } from "@t3tools/client-runtime/state/thread-workflows";
 import { resolveThreadReferenceCopyTarget } from "@t3tools/shared/threadReference";
 import {
   canPreloadBrowsePath,
@@ -1108,19 +1109,21 @@ function OpenCommandPaletteDialog(props: {
           ),
         )
       : null;
+    // Side chats belong to their parent, unless the parent is gone.
+    const listable = makeSideChatListingFilter(threads);
     const latestThread = groupedProjectKeys
       ? (sortThreads(
           threads.filter(
             (thread) =>
               thread.archivedAt === null &&
-              !thread.sideChat &&
+              listable(thread) &&
               groupedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`),
           ),
           clientSettings.sidebarThreadSortOrder,
         )[0] ?? null)
       : getLatestThreadForProject(
           threads.filter(
-            (thread) => thread.environmentId === project.environmentId && !thread.sideChat,
+            (thread) => thread.environmentId === project.environmentId && listable(thread),
           ),
           project.id,
           clientSettings.sidebarThreadSortOrder,
@@ -2249,9 +2252,10 @@ function OpenCommandPaletteDialog(props: {
       cwd,
     );
     if (existing) {
+      const listable = makeSideChatListingFilter(threads);
       const latestThread = getLatestThreadForProject(
         threads.filter(
-          (thread) => thread.environmentId === existing.environmentId && !thread.sideChat,
+          (thread) => thread.environmentId === existing.environmentId && listable(thread),
         ),
         existing.id,
         clientSettings.sidebarThreadSortOrder,
