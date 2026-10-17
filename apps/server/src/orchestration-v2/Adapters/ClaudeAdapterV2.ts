@@ -235,6 +235,10 @@ const CLAUDE_SCRIPT_EXTENSIONS = [".js", ".mjs", ".tsx", ".ts", ".jsx"];
 // The SDK puts no deadline on control requests. The CLI answers
 // mcp_set_servers once each server connected or hit its own 30 s timeout.
 const CLAUDE_MCP_REGISTRATION_TIMEOUT = "90 seconds";
+// Claude Code flushes transcript writes every 100 ms, so a workflow member's
+// reply can land after the progress frame that settles it. Its transcript
+// stays the source of its answer this long after it settles.
+const WORKFLOW_MEMBER_TRANSCRIPT_FLUSH_MS = 500;
 
 /**
  * When the CLI exits it stops the MCP servers it started, but not their children: a plugin's
@@ -4699,6 +4703,15 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             let textShown = !restarted && previous?.textShown === true;
             let resultShown = !restarted && previous?.resultShown === true;
             let transcriptRead = false;
+            let lastReadAt = now;
+            const awaitingReply = () => settled && transcriptRead && !textShown && !resultShown;
+            // Milliseconds until a read started at `at` sees every line the
+            // member wrote before it settled.
+            const flushWindowLeft = (at: DateTime.Utc) =>
+              completedAt === null
+                ? 0
+                : WORKFLOW_MEMBER_TRANSCRIPT_FLUSH_MS -
+                  (DateTime.toEpochMillis(at) - DateTime.toEpochMillis(completedAt));
             // Each read is capped, so keep reading until the transcript has no
             // more complete lines; a settled member's answer may be past the cap.
             let transcriptDrained = true;
@@ -4721,28 +4734,52 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                         ),
                       }),
                 }).pipe(Effect.option);
-              transcriptDrained = false;
-              while (!transcriptDrained) {
-                const read = yield* readNext(transcriptCursor);
-                if ((yield* Ref.get(sessionSubagentsByTaskId)).get(taskId) !== input.coordinator)
-                  return;
-                if (Option.isNone(read)) break;
-                transcriptRead = true;
-                const advanced = read.value.cursor.offset !== transcriptCursor.offset;
-                transcriptCursor = read.value.cursor;
-                for (const line of read.value.lines) {
-                  if (yield* projectSubagentTranscriptLine(target, line)) textShown = true;
+              // False once the coordinator was replaced mid-read.
+              const drain = Effect.fnUntraced(function* () {
+                lastReadAt = yield* DateTime.now;
+                transcriptDrained = false;
+                while (!transcriptDrained) {
+                  const read = yield* readNext(transcriptCursor);
+                  if ((yield* Ref.get(sessionSubagentsByTaskId)).get(taskId) !== input.coordinator)
+                    return false;
+                  if (Option.isNone(read)) break;
+                  transcriptRead = true;
+                  const advanced = read.value.cursor.offset !== transcriptCursor.offset;
+                  transcriptCursor = read.value.cursor;
+                  for (const line of read.value.lines) {
+                    if (yield* projectSubagentTranscriptLine(target, line)) textShown = true;
+                  }
+                  // A line longer than the cap can't advance; stop rather than spin.
+                  transcriptDrained = !read.value.truncated || !advanced;
                 }
-                // A line longer than the cap can't advance; stop rather than spin.
-                transcriptDrained = !read.value.truncated || !advanced;
+                return true;
+              });
+              if (!(yield* drain())) return;
+              // The coordinator sends nothing after its last frame, so wait out
+              // the flush window here rather than settle on the excerpt.
+              const waitLeft = flushWindowLeft(lastReadAt);
+              if (
+                input.coordinator.task.status !== "running" &&
+                awaitingReply() &&
+                member.result !== undefined &&
+                waitLeft > 0
+              ) {
+                yield* Effect.sleep(waitLeft);
+                if (!(yield* drain())) return;
               }
             }
             if (settled) {
               // As for an ordinary subagent, a call still open once the member
               // settles will never get its result.
               yield* endOpenToolCalls();
-              // Only the progress excerpt is left when the transcript says nothing.
-              if (!textShown && !resultShown && member.result !== undefined) {
+              // Only the progress excerpt is left when the transcript says
+              // nothing, read after its last writes had time to land.
+              if (
+                !textShown &&
+                !resultShown &&
+                member.result !== undefined &&
+                (!transcriptRead || flushWindowLeft(lastReadAt) <= 0)
+              ) {
                 yield* emitSubagentConversationMessage({
                   nativeItemId: `${memberKey}:result:${attempt}`,
                   threadId: childThreadId,
