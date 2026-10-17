@@ -98,6 +98,8 @@ export function makeSubagentConversationArtifacts(input: {
   readonly nativeItemRef: OrchestrationV2ProviderRef | null;
   readonly role: "user" | "assistant";
   readonly text: string;
+  /** Marks a user message as the script a workflow run executes. */
+  readonly workflowScript?: boolean;
   readonly ordinal: number;
   readonly now: DateTime.Utc;
 }): {
@@ -115,6 +117,7 @@ export function makeSubagentConversationArtifacts(input: {
     ...(input.role === "user" && input.senderThreadId !== undefined
       ? { senderThreadId: input.senderThreadId }
       : {}),
+    ...(input.role === "user" && input.workflowScript === true ? { workflowScript: true } : {}),
     text: input.text,
     attachments: [],
     streaming: false,
@@ -147,6 +150,7 @@ export function makeSubagentConversationArtifacts(input: {
           creationSource: "provider",
           type: "user_message",
           ...(input.senderThreadId === undefined ? {} : { senderThreadId: input.senderThreadId }),
+          ...(input.workflowScript === true ? { workflowScript: true } : {}),
           inputIntent: "turn_start",
           attachments: [],
         }

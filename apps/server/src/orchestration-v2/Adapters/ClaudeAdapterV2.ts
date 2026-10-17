@@ -4458,6 +4458,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           readonly rootNodeId: OrchestrationV2ExecutionNode["id"];
           readonly role: "user" | "assistant";
           readonly text: string;
+          readonly workflowScript?: boolean;
           readonly ordinal: number;
           readonly now: DateTime.Utc;
         }) {
@@ -4482,6 +4483,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             },
             role: input.role,
             text: input.text,
+            ...(input.workflowScript === true ? { workflowScript: true } : {}),
             ordinal: input.ordinal,
             now: input.now,
           });
@@ -5146,6 +5148,11 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               rootNodeId: childRootNodeId,
               role: "user",
               text: task.prompt,
+              // A workflow's prompt is its script; clients open the thread with
+              // the workflow's plan instead and keep the script collapsed.
+              ...(existingSubagent === undefined && task.workflow !== undefined
+                ? { workflowScript: true }
+                : {}),
               ordinal: existingSubagent === undefined ? 100 : ++subagent.nextChildItemOrdinal,
               now,
             });
