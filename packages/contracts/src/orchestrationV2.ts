@@ -2599,6 +2599,8 @@ export const OrchestrationV2Command = Schema.Union([
     threadId: ThreadId,
     /** Delete only while no message or run has landed on the thread. */
     expectedEmpty: Schema.optional(Schema.Boolean),
+    /** Delete only while the thread is still a side chat; a promoted one stays. */
+    expectedSideChat: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({
     type: Schema.Literal("thread.settle"),
@@ -3328,10 +3330,15 @@ export const OrchestrationV2ThreadStreamItem = Schema.Union([
 export type OrchestrationV2ThreadStreamItem = typeof OrchestrationV2ThreadStreamItem.Type;
 
 /**
- * Why a command was refused, where a client acts on it. `thread_not_empty`: a
- * delete sent with `expectedEmpty` found messages or runs, so the thread stays.
+ * Why a command was refused, where a client acts on it. A delete sent with
+ * `expectedEmpty` found messages or runs (`thread_not_empty`), or one sent with
+ * `expectedSideChat` found the thread promoted (`thread_not_side_chat`), so the
+ * thread stays.
  */
-export const OrchestrationV2DispatchRejectionReason = Schema.Literal("thread_not_empty");
+export const OrchestrationV2DispatchRejectionReason = Schema.Literals([
+  "thread_not_empty",
+  "thread_not_side_chat",
+]);
 export type OrchestrationV2DispatchRejectionReason =
   typeof OrchestrationV2DispatchRejectionReason.Type;
 

@@ -10736,8 +10736,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
             ),
           );
-        // Decided under the thread's command lock, so a message that already
-        // landed always wins over "discard if empty".
+        // Decided under the thread's command lock, so a promotion or a message
+        // that already landed always wins over "discard if empty".
+        if (command.expectedSideChat === true && projection.thread.sideChat !== true) {
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            reason: "thread_not_side_chat",
+            cause: `Thread ${command.threadId} is no longer a side chat.`,
+          });
+        }
         if (command.expectedEmpty === true) {
           const messageCount = yield* projectionStore
             .getMessageCount(command.threadId)

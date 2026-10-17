@@ -677,6 +677,20 @@ it.effect("links a side chat under its parent without claiming a fork, and promo
     assert.equal((yield* projections.getThread(sideChatId)).sideChat, false);
     assert.equal((yield* projections.getThreadShell(sideChatId))?.sideChat, false);
 
+    // A stale "discard if empty" from a client that has not seen the promotion
+    // leaves the promoted thread alone.
+    const promotedDiscard = yield* Effect.flip(
+      orchestrator.dispatch({
+        type: "thread.delete",
+        commandId: CommandId.make("discard-promoted-side-chat"),
+        threadId: sideChatId,
+        expectedEmpty: true,
+        expectedSideChat: true,
+      }),
+    );
+    assert.equal(dispatchRejectionReason(promotedDiscard), "thread_not_side_chat");
+    assert.isNull((yield* projections.getThread(sideChatId)).deletedAt);
+
     const crossProject = yield* Effect.exit(
       orchestrator.dispatch({
         type: "thread.create",

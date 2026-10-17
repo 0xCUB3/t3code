@@ -120,8 +120,9 @@ export function parseSideCommand(prompt: string): ParsedSideCommand | null {
   return { command: match[1] as ParsedSideCommand["command"], question: (match[2] ?? "").trim() };
 }
 
-/** Panel layout shortcuts the host thread still handles while a side chat has focus. */
+/** Panel layout and Find shortcuts the host thread still handles while a side chat has focus. */
 export const SIDE_CHAT_PASSTHROUGH_COMMANDS: ReadonlySet<KeybindingCommand> = new Set([
+  "chat.find",
   "rightPanel.close",
   "rightPanel.toggle",
   "rightPanel.toggleMaximized",
@@ -132,7 +133,38 @@ export const SIDE_CHAT_OWN_COMMANDS: ReadonlySet<KeybindingCommand> = new Set([
   "thread.stop",
   "modelPicker.toggle",
   "composer.effort",
+  "composer.increaseEffort",
+  "composer.decreaseEffort",
   "composer.mode",
   "thread.steerQueuedMessage",
   "thread.editQueuedMessage",
 ]);
+
+/**
+ * Whether one chat view takes a window shortcut. A host thread and its embedded
+ * side chat both listen, so each claims only its own keys. `targetChat` is the
+ * embedded chat the event came from, or null outside any; `resolveCommand` is
+ * only called when the answer depends on the command.
+ */
+export function chatClaimsShortcut(input: {
+  readonly embedded: boolean;
+  readonly threadId: string;
+  /** Embedded only: this side chat has its parent's composer. */
+  readonly focused: boolean;
+  /** Host only: the side chat that has this thread's composer. */
+  readonly focusedSideChatId: string | null;
+  readonly targetChat: string | null;
+  readonly resolveCommand: () => KeybindingCommand | null;
+}): boolean {
+  const { targetChat } = input;
+  // A side chat answers keys pressed inside it, and keys pressed outside any
+  // chat while it has its parent's composer.
+  if (input.embedded)
+    return targetChat === input.threadId || (targetChat === null && input.focused);
+  if (targetChat === null && input.focusedSideChatId === null) return true;
+  const command = input.resolveCommand();
+  // Outside any chat, composer shortcuts go to the side chat that has the composer.
+  if (targetChat === null) return command === null || !SIDE_CHAT_OWN_COMMANDS.has(command);
+  // With focus in a side chat, only panel layout and Find act on the host.
+  return command !== null && SIDE_CHAT_PASSTHROUGH_COMMANDS.has(command);
+}

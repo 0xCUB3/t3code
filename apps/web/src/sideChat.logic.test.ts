@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { ThreadId } from "@t3tools/contracts";
+import type { KeybindingCommand, ThreadId } from "@t3tools/contracts";
 
 import {
+  chatClaimsShortcut,
   isEmptySideChat,
   isPreviousSideChat,
   parseSideCommand,
@@ -117,5 +118,47 @@ describe("side chat logic", () => {
     expect(parseSideCommand("/side")).toEqual({ command: "side", question: "" });
     expect(parseSideCommand("/sidebar")).toBeNull();
     expect(parseSideCommand("read /side")).toBeNull();
+  });
+
+  describe("shortcut ownership between a thread and its side chat", () => {
+    const claims = (
+      input: Partial<Parameters<typeof chatClaimsShortcut>[0]> & {
+        readonly command?: KeybindingCommand | null;
+      },
+    ) =>
+      chatClaimsShortcut({
+        embedded: false,
+        threadId: "parent",
+        focused: false,
+        focusedSideChatId: null,
+        targetChat: null,
+        resolveCommand: () => input.command ?? null,
+        ...input,
+      });
+
+    it("lets a side chat take only keys pressed in it, or outside any chat while it has the composer", () => {
+      const side = { embedded: true, threadId: "side" };
+      expect(claims({ ...side, targetChat: "side" })).toBe(true);
+      expect(claims({ ...side, targetChat: "other" })).toBe(false);
+      expect(claims({ ...side, targetChat: null })).toBe(false);
+      expect(claims({ ...side, targetChat: null, focused: true })).toBe(true);
+    });
+
+    it("sends composer shortcuts outside any chat to the side chat that has the composer", () => {
+      const withSide = { focusedSideChatId: "side" };
+      expect(claims({ ...withSide, command: "modelPicker.toggle" })).toBe(false);
+      expect(claims({ ...withSide, command: "composer.increaseEffort" })).toBe(false);
+      expect(claims({ ...withSide, command: "rightPanel.toggle" })).toBe(true);
+      expect(claims({ ...withSide, command: null })).toBe(true);
+      expect(claims({ command: "modelPicker.toggle" })).toBe(true);
+    });
+
+    it("keeps panel layout and Find on the host while focus is in a side chat", () => {
+      const inSide = { focusedSideChatId: "side", targetChat: "side" };
+      expect(claims({ ...inSide, command: "chat.find" })).toBe(true);
+      expect(claims({ ...inSide, command: "rightPanel.toggleMaximized" })).toBe(true);
+      expect(claims({ ...inSide, command: "thread.copyReference" })).toBe(false);
+      expect(claims({ ...inSide, command: null })).toBe(false);
+    });
   });
 });

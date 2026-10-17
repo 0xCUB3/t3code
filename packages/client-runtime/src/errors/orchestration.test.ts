@@ -8,23 +8,28 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   wasBootstrapThreadDeleted,
   wasBootstrapThreadNotCreated,
-  wasThreadNotEmpty,
+  wasDiscardRefused,
 } from "./orchestration.ts";
 
-describe("wasThreadNotEmpty", () => {
-  it("accepts only the expected-empty rejection", () => {
+describe("wasDiscardRefused", () => {
+  it("accepts only the conditional discard rejections", () => {
     const base = {
       commandId: CommandId.make("delete-side-chat"),
       commandType: "thread.delete",
       message: "Thread thread-1 is no longer empty.",
     };
     expect(
-      wasThreadNotEmpty(
+      wasDiscardRefused(
         new OrchestrationV2DispatchCommandError({ ...base, reason: "thread_not_empty" }),
       ),
     ).toBe(true);
-    expect(wasThreadNotEmpty(new OrchestrationV2DispatchCommandError(base))).toBe(false);
-    expect(wasThreadNotEmpty(new Error("connection lost"))).toBe(false);
+    expect(
+      wasDiscardRefused(
+        new OrchestrationV2DispatchCommandError({ ...base, reason: "thread_not_side_chat" }),
+      ),
+    ).toBe(true);
+    expect(wasDiscardRefused(new OrchestrationV2DispatchCommandError(base))).toBe(false);
+    expect(wasDiscardRefused(new Error("connection lost"))).toBe(false);
   });
 });
 

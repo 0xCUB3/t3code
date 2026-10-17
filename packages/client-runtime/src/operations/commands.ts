@@ -88,6 +88,8 @@ export interface ThreadCommandInput extends CommandMetadata {
 export interface DeleteThreadInput extends ThreadCommandInput {
   /** Delete only while the thread has no message or run yet. */
   readonly expectedEmpty?: boolean;
+  /** Delete only while the thread is still a side chat. */
+  readonly expectedSideChat?: boolean;
 }
 export type ArchiveThreadInput = ThreadCommandInput;
 export type UnarchiveThreadInput = ThreadCommandInput;
@@ -433,13 +435,16 @@ function simpleThreadCommand(
 export const deleteThread = Effect.fn("EnvironmentCommands.deleteThread")(function* (
   input: DeleteThreadInput,
 ) {
-  if (input.expectedEmpty !== true) return yield* simpleThreadCommand("thread.delete", input);
+  if (input.expectedEmpty !== true && input.expectedSideChat !== true) {
+    return yield* simpleThreadCommand("thread.delete", input);
+  }
   const commandId = yield* allocateCommandId(input);
   return yield* dispatch({
     type: "thread.delete",
     commandId,
     threadId: input.threadId,
-    expectedEmpty: true,
+    ...(input.expectedEmpty === true ? { expectedEmpty: true } : {}),
+    ...(input.expectedSideChat === true ? { expectedSideChat: true } : {}),
   });
 });
 

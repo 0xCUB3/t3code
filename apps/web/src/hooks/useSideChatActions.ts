@@ -5,7 +5,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import { resolveSideChatHistoryAvailability } from "@t3tools/client-runtime/state/thread-workflows";
 import type { RunId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
-import { wasThreadNotEmpty } from "@t3tools/client-runtime/errors";
+import { wasDiscardRefused } from "@t3tools/client-runtime/errors";
 
 import { useComposerDraftStore } from "../composerDraftStore";
 import { newMessageId, newThreadId } from "../lib/utils";
@@ -282,12 +282,12 @@ export function useSideChatActions(parentRef: ScopedThreadRef | null) {
     // server deletes only if the thread is still empty. If not, it stays listed.
     const result = await deleteThread({
       environmentId: parentRef.environmentId,
-      input: { threadId: childThreadId, expectedEmpty: true },
+      input: { threadId: childThreadId, expectedEmpty: true, expectedSideChat: true },
     });
     if (result._tag === "Success" || isAtomCommandInterrupted(result)) return;
     const error = squashAtomCommandFailure(result);
-    // A message landed first, so the server kept it: expected, not a failure.
-    if (wasThreadNotEmpty(error)) return;
+    // A message landed first or it was promoted, so the server kept it.
+    if (wasDiscardRefused(error)) return;
     reportFailure("Could not discard the empty side chat", error);
   });
 

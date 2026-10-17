@@ -106,7 +106,9 @@ export function dispatchRejectionReason(
 ): OrchestrationV2DispatchRejectionReason | undefined {
   if (!Predicate.isObject(value) || seen.has(value)) return undefined;
   seen.add(value);
-  if (value.reason === "thread_not_empty") return value.reason;
+  if (value.reason === "thread_not_empty" || value.reason === "thread_not_side_chat") {
+    return value.reason;
+  }
   return dispatchRejectionReason(value.cause, seen) ?? dispatchRejectionReason(value.error, seen);
 }
 

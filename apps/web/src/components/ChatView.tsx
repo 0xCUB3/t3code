@@ -419,11 +419,7 @@ import { useAsideTitles } from "../hooks/useAsideTitles";
 import { useSideChatHost } from "../hooks/useSideChatHost";
 import { type SideChatEmbedding, useSideChatGuest } from "../hooks/useSideChatGuest";
 import { ComposerAnchor } from "./chat/ComposerAnchor";
-import {
-  parseSideCommand,
-  SIDE_CHAT_OWN_COMMANDS,
-  SIDE_CHAT_PASSTHROUGH_COMMANDS,
-} from "../sideChat.logic";
+import { chatClaimsShortcut, parseSideCommand, SIDE_CHAT_OWN_COMMANDS } from "../sideChat.logic";
 import { chatViewOf } from "./chat/composerEventScope";
 import { useRemoteOpenState } from "~/remoteOpen";
 import { shouldShowOpenInPicker } from "./chat/OpenInPicker.logic";
@@ -1659,7 +1655,9 @@ export default function ChatView(props: ChatViewProps) {
   );
   const canReuseTerminal = activeThreadKnownSessionsRaw !== null;
   const previewPanelOpen = activeRightPanelKind === "preview" && browserAvailable;
-  const rightPanelOpen = rightPanelState.isOpen;
+  // An embedded side chat has no right panel of its own. Its persisted layout
+  // (open, maximized) belongs to its full-thread view and must not apply here.
+  const rightPanelOpen = !embedded && rightPanelState.isOpen;
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
   const activeTerminalDrawerPresence = usePanelPresence(
@@ -2957,7 +2955,8 @@ export default function ChatView(props: ChatViewProps) {
     remoteOpenMode: remoteOpenState.mode,
   });
   useOpenFavoriteEditorShortcut({
-    enabled: showOpenInPicker,
+    // A global shortcut: only the host registers it, so one keypress opens one editor.
+    enabled: !embedded && showOpenInPicker,
     environmentId: activeThread?.environmentId ?? environmentId,
     keybindings,
     availableEditors,
@@ -5557,18 +5556,18 @@ export default function ChatView(props: ChatViewProps) {
     getShortcutContext: getShortcutContextStable,
     // A side chat has no find bar; find belongs to the host thread.
     threadFindActive: !embedded && isThreadFindActive,
-    claimsEvent: (event) => {
-      const targetChat = chatViewOf(event.target);
-      // A side chat only answers keys pressed inside it.
-      if (embedded) return targetChat === threadId;
-      if (targetChat === null || !(event.target instanceof Element)) return true;
-      // With focus in a side chat, only the panel layout shortcuts act here;
-      // thread shortcuts belong to this thread, not the side chat.
-      const command = resolveShortcutCommand(event, keybindings, {
-        context: getShortcutContextStable(event.target),
-      });
-      return command !== null && SIDE_CHAT_PASSTHROUGH_COMMANDS.has(command);
-    },
+    claimsEvent: (event) =>
+      chatClaimsShortcut({
+        embedded,
+        threadId,
+        focused: sideChat?.focused === true,
+        focusedSideChatId,
+        targetChat: chatViewOf(event.target),
+        resolveCommand: () =>
+          resolveShortcutCommand(event, keybindings, {
+            context: getShortcutContextStable(event.target),
+          }),
+      }),
     ...(embedded ? { runsCommand: (command) => SIDE_CHAT_OWN_COMMANDS.has(command) } : {}),
     // Typing goes to whichever composer this thread is talking through.
     typeIntoComposer: (key) =>
@@ -8003,8 +8002,12 @@ export default function ChatView(props: ChatViewProps) {
               skills: timelineSkills,
               progressive: serverConfig?.threadFindProgressive === true,
               thread: activeThreadRef,
+              // Find belongs to the host thread; a side chat has no find bar.
               enabled:
-                isServerThread && serverConfig?.threadFind === true && !paintOnlyDisplayedTimeline,
+                !embedded &&
+                isServerThread &&
+                serverConfig?.threadFind === true &&
+                !paintOnlyDisplayedTimeline,
               content: serverProjection ?? undefined,
             }}
             controlsRef={threadFindControlsRef}
@@ -8766,7 +8769,7 @@ export default function ChatView(props: ChatViewProps) {
       ) : null}
 
       <RevertConfirmHost threadKey={routeThreadKey} onConfirm={onConfirmRevertStable} />
-      <LinkPullRequestDialogHost />
+      {embedded ? null : <LinkPullRequestDialogHost />}
       <ThreadVisitWatermark threadRef={routeThreadRef} />
       <ExpandedImageDialogHost threadKey={routeThreadKey} />
     </div>
