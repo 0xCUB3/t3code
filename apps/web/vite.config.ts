@@ -242,6 +242,7 @@ export default defineConfig(() => {
       devSourcemap: buildSourcemap !== false,
     },
     build: {
+      rolldownOptions: { input: ["index.html", "pdf-viewer.html"] },
       outDir: "dist",
       emptyOutDir: true,
       manifest: true,

@@ -34,8 +34,6 @@ import { readLocalApi } from "~/localApi";
 import { cn } from "~/lib/utils";
 import { primaryServerKeybindingsAtom, serverEnvironment } from "~/state/server";
 
-const PDF_VIEWER_FRAGMENT = "#toolbar=0&view=FitH";
-
 /**
  * The page reports the keys, and a page script can report any key it likes,
  * so only commands that change what the reader sees are here, never one that
@@ -65,8 +63,7 @@ export const isPdfPreviewFile = (path: string): boolean =>
 
 /**
  * HTML runs in a sandboxed frame with an opaque origin, so a page cannot reach
- * the app's session or storage. The built-in PDF viewer needs an unsandboxed
- * frame; a PDF runs no scripts.
+ * the app's session or storage. PDFs use the client's bundled renderer.
  */
 export function BrowserDocumentFrame(props: {
   readonly src: string;
@@ -76,11 +73,12 @@ export function BrowserDocumentFrame(props: {
   readonly threadRef?: ScopedThreadRef | undefined;
 }) {
   const className = "min-h-0 flex-1 border-0 bg-white";
+  const [pdfUrl, fragment] = props.src.split(/#(.*)/s);
   return props.pdf ? (
-    // oxlint-disable-next-line react/iframe-missing-sandbox -- the built-in PDF viewer needs an unsandboxed frame.
+    // oxlint-disable-next-line react/iframe-missing-sandbox -- trusted client code needs its origin to load modules and fetch signed PDF bytes.
     <iframe
       key={props.src}
-      src={`${props.src}${PDF_VIEWER_FRAGMENT}`}
+      src={`/pdf-viewer.html?file=${encodeURIComponent(pdfUrl ?? props.src)}${fragment ? `#${fragment}` : ""}`}
       title={props.title}
       className={className}
     />
