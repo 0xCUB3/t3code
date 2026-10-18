@@ -125,7 +125,7 @@ export function ThreadListToolbar(props: {
               <WorkspaceConnectionTitle
                 grow
                 onPress={props.onOpenEnvironments}
-                brand={<CompactBrandTitle allowFontScaling={false} />}
+                brand={<CompactBrandTitle allowFontScaling={false} fit />}
               />
             </View>
             <AndroidHeaderIconButton
