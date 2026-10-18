@@ -477,16 +477,18 @@ export const make = Effect.gen(function* () {
     yield* eachTarget(group, (target) => {
       const report = evaluatePullRequestWatch(target.watch, detail, remarks);
       if (report.changes.length > 0) {
-        return record(
-          target,
-          report.exhausted ? null : report.next,
-          pullRequestWatchMessage({
-            number: target.link.number,
-            url: target.link.url,
-            baseBranch: detail.baseBranch,
-            headSha: report.next.headSha,
-            report,
-          }),
+        const wake = pullRequestWatchMessage({
+          number: target.link.number,
+          url: target.link.url,
+          baseBranch: detail.baseBranch,
+          headSha: report.next.headSha,
+          report,
+        });
+        // Save what this pass saw before ending, so watching again starts from it.
+        return (
+          report.exhausted
+            ? record(target, report.next).pipe(Effect.andThen(record(target, null, wake)))
+            : record(target, report.next, wake)
         ).pipe(
           Effect.tap(() => woke(target)),
           Effect.tap(() => (report.exhausted ? ended(target, "comment-limit") : Effect.void)),

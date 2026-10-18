@@ -3110,6 +3110,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           const linked = threadPullRequestsOf(thread);
           const visible = (link: ThreadPullRequestLink) =>
             link.source !== "stack-dismissed" && threadPullRequestKeysEqual(link, key);
+          const dismissed = linked.find((link) => threadPullRequestKeysEqual(link, key));
           const links =
             command.type === "thread.pull-request.watch" &&
             command.watching &&
@@ -3124,6 +3125,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                     linkedAt: startedAt,
                     snapshot: null,
                     stack: null,
+                    ...(dismissed?.endedWatch && { endedWatch: dismissed.endedWatch }),
                   },
                 ]
               : linked;
