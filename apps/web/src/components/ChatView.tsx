@@ -1632,7 +1632,11 @@ export default function ChatView(props: ChatViewProps) {
     const explicitThreadRef = explicitDiffOpenRef.current;
     explicitDiffOpenRef.current = null;
     if (!diffOpen || !activeThreadRef || explicitThreadRef === activeThreadRef) return;
-    if (takeExplicitDiffOpenAcrossNavigation(scopedThreadKey(activeThreadRef))) return;
+    if (takeExplicitDiffOpenAcrossNavigation(scopedThreadKey(activeThreadRef))) {
+      // StrictMode replays this effect; the replay must skip the reset too.
+      explicitDiffOpenRef.current = activeThreadRef;
+      return;
+    }
     useDiffPanelStore.getState().selectGitScope(activeThreadRef, "branch");
   }, [activeThreadRef, diffOpen]);
   const rightPanelState = useRightPanelStore((state) =>
