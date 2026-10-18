@@ -387,35 +387,55 @@ export const captureViewport = async (
   return data;
 };
 
-// Resize after capture in an isolated encoder page. Scaling CDP's clip changes the
-// target's rendering scale; resizing the pixels does not touch the target or its streams.
-const captureSnapshot = async (cdp: CDPSession, imagePage: () => Promise<Page>) => {
+// Resize pixels in the existing tab's isolated world: no extra browser, DOM changes,
+// or rendering-scale override (which would blur hidden desktop webviews).
+const captureSnapshot = async (cdp: CDPSession) => {
   const data = await captureViewport(cdp, { format: "png" });
   const { width, height } = pngDimensions(Buffer.from(data, "base64"));
   const scale = Math.min(1, MAX_SCREENSHOT_DIMENSION / Math.max(width, height));
   if (scale === 1) return data;
-  const encoder = await imagePage();
-  try {
-    return await encoder.evaluate<string>(`(async () => {
-      const image = new Image();
-      image.src = ${JSON.stringify(`data:image/png;base64,${data}`)};
-      await image.decode();
-      const canvas = document.createElement("canvas");
-      canvas.width = ${Math.max(1, Math.round(width * scale))};
-      canvas.height = ${Math.max(1, Math.round(height * scale))};
-      const context = canvas.getContext("2d");
-      context.imageSmoothingQuality = "high";
-      context.drawImage(image, 0, 0, canvas.width, canvas.height);
-      return canvas.toDataURL("image/png").split(",")[1];
-    })()`);
-  } finally {
-    await encoder.close();
+  const { frameTree } = await cdp.send("Page.getFrameTree");
+  const { executionContextId } = await cdp.send("Page.createIsolatedWorld", {
+    frameId: frameTree.frame.id,
+    worldName: "t3-snapshot-encoder",
+  });
+  const { result, exceptionDetails } = await cdp.send("Runtime.callFunctionOn", {
+    executionContextId,
+    functionDeclaration: `async function(data, width, height) {
+      const bytes = Uint8Array.from(atob(data), c => c.charCodeAt(0));
+      const image = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
+      try {
+        const canvas = new OffscreenCanvas(width, height);
+        const context = canvas.getContext("2d");
+        context.imageSmoothingQuality = "high";
+        context.drawImage(image, 0, 0, width, height);
+        const blob = await canvas.convertToBlob({ type: "image/png" });
+        return await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result.split(",")[1]);
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(blob);
+        });
+      } finally {
+        image.close();
+      }
+    }`,
+    arguments: [
+      { value: data },
+      { value: Math.max(1, Math.round(width * scale)) },
+      { value: Math.max(1, Math.round(height * scale)) },
+    ],
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  if (exceptionDetails || typeof result.value !== "string") {
+    throw new Error("Snapshot PNG resize failed.");
   }
+  return result.value as string;
 };
 type SnapshotInput = {
   readonly page: Page;
   readonly cdp: CDPSession;
-  readonly imagePage: () => Promise<Page>;
   readonly consoleEntries: ReadonlyArray<PreviewAutomationConsoleEntry>;
   readonly networkEntries: ReadonlyArray<PreviewAutomationNetworkEntry>;
   readonly actionTimeline: PreviewAutomationSnapshot["actionTimeline"];
@@ -439,7 +459,7 @@ const capture = async (
         "url" | "title" | "loading" | "visibleText" | "interactiveElements"
       >
     >,
-    captureSnapshot(input.cdp, input.imagePage),
+    captureSnapshot(input.cdp),
   ]);
   void pageAndScreenshot.catch(constVoid);
   // Leaves time for the second read; a frame that never loads holds the tree until then.

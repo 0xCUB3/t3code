@@ -44,7 +44,6 @@ describe("server browser element refs", () => {
     ServerBrowserPage.snapshot({
       page,
       cdp,
-      imagePage: () => browser.newPage(),
       consoleEntries: [],
       networkEntries: [],
       actionTimeline: [],
@@ -83,13 +82,20 @@ describe("server browser element refs", () => {
     });
     try {
       const hiDpiPage = await hiDpi.newPage();
-      await hiDpiPage.setContent("<p>sharp</p>");
+      await hiDpiPage.setContent(
+        `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none'; img-src 'none'"><p>sharp</p>`,
+      );
+      // Hostile page globals and a strict CSP must not interfere with the encoder.
+      await hiDpiPage.evaluate(`(() => {
+        globalThis.createImageBitmap = globalThis.OffscreenCanvas = () => {
+          throw new Error("Do not use the page's encoder globals");
+        };
+      })()`);
       const hiDpiCdp = await hiDpi.newCDPSession(hiDpiPage);
       const send = vi.spyOn(hiDpiCdp, "send");
       const { screenshot } = await ServerBrowserPage.snapshot({
         page: hiDpiPage,
         cdp: hiDpiCdp,
-        imagePage: () => hiDpiBrowser.newPage(),
         consoleEntries: [],
         networkEntries: [],
         actionTimeline: [],
@@ -97,6 +103,9 @@ describe("server browser element refs", () => {
       expect(send.mock.calls.filter(([method]) => method === "Page.captureScreenshot")).toEqual([
         ["Page.captureScreenshot", { format: "png" }],
       ]);
+      expect(hiDpiBrowser.contexts()).toEqual([hiDpi]);
+      expect(hiDpi.pages()).toEqual([hiDpiPage]);
+      expect(await hiDpiPage.locator("body").innerHTML()).toBe("<p>sharp</p>");
       expect(await hiDpiPage.evaluate("devicePixelRatio")).toBe(2);
       expect(hiDpiPage.viewportSize()).toEqual({ width, height });
       const png = Buffer.from(screenshot.data, "base64");
