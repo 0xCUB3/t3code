@@ -52,9 +52,11 @@ import {
   resolveDraftHeroState,
   resolveWorktreeSetupProgress,
   isPaintOnlyThreadTimeline,
+  markExplicitDiffOpenAcrossNavigation,
   peekHeldThreadTimeline,
   peekRememberedThreadTimeline,
   rememberReadyThreadTimeline,
+  takeExplicitDiffOpenAcrossNavigation,
   resetHeldThreadTimeline,
   resolveThreadSwitchTimeline,
   threadKeysShareEnvironment,
@@ -1025,6 +1027,18 @@ describe("draft hero submission transition", () => {
         backgroundSubmissionPending: true,
       }),
     ).toBeNull();
+  });
+});
+
+describe("explicit diff open across navigation", () => {
+  it("keeps a turn diff opened from an embedded side chat once, for that thread only", () => {
+    markExplicitDiffOpenAcrossNavigation("env-1:side");
+    expect(takeExplicitDiffOpenAcrossNavigation("env-1:other")).toBe(false);
+    expect(takeExplicitDiffOpenAcrossNavigation("env-1:side")).toBe(false);
+
+    markExplicitDiffOpenAcrossNavigation("env-1:side");
+    expect(takeExplicitDiffOpenAcrossNavigation("env-1:side")).toBe(true);
+    expect(takeExplicitDiffOpenAcrossNavigation("env-1:side")).toBe(false);
   });
 });
 

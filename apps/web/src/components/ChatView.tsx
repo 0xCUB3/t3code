@@ -15,6 +15,8 @@ import { useQueuedRunEdit } from "./chat/useQueuedRunEdit";
 import {
   isPaintOnlyThreadTimeline,
   peekHeldThreadTimeline,
+  markExplicitDiffOpenAcrossNavigation,
+  takeExplicitDiffOpenAcrossNavigation,
   peekRememberedThreadTimeline,
   rememberReadyThreadTimeline,
   resolveThreadSwitchTimeline,
@@ -1629,9 +1631,9 @@ export default function ChatView(props: ChatViewProps) {
   useLayoutEffect(() => {
     const explicitThreadRef = explicitDiffOpenRef.current;
     explicitDiffOpenRef.current = null;
-    if (diffOpen && activeThreadRef && explicitThreadRef !== activeThreadRef) {
-      useDiffPanelStore.getState().selectGitScope(activeThreadRef, "branch");
-    }
+    if (!diffOpen || !activeThreadRef || explicitThreadRef === activeThreadRef) return;
+    if (takeExplicitDiffOpenAcrossNavigation(scopedThreadKey(activeThreadRef))) return;
+    useDiffPanelStore.getState().selectGitScope(activeThreadRef, "branch");
   }, [activeThreadRef, diffOpen]);
   const rightPanelState = useRightPanelStore((state) =>
     selectThreadRightPanelState(state.byThreadKey, activeThreadRef),
@@ -7748,6 +7750,8 @@ export default function ChatView(props: ChatViewProps) {
     const diffOpen =
       selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, activeThreadRef) === "diff";
     explicitDiffOpenRef.current = diffOpen ? null : activeThreadRef;
+    // Embedded, opening the diff navigates to this thread as a full view.
+    if (embedded) markExplicitDiffOpenAcrossNavigation(scopedThreadKey(activeThreadRef));
     useDiffPanelStore.getState().selectTurn(activeThreadRef, runId, filePath);
     useRightPanelStore.getState().open(activeThreadRef, "diff");
     onDiffPanelOpen?.();
