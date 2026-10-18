@@ -7751,14 +7751,6 @@ export default function ChatView(props: ChatViewProps) {
     useDiffPanelStore.getState().selectTurn(activeThreadRef, runId, filePath);
     useRightPanelStore.getState().open(activeThreadRef, "diff");
     onDiffPanelOpen?.();
-    // The host's diff panel only knows the host's runs, so a side chat's diff
-    // opens with the side chat as a full thread, where its own panel renders.
-    if (embedded) {
-      void navigate({
-        to: "/$environmentId/$threadId",
-        params: buildThreadRouteParams(activeThreadRef),
-      });
-    }
   };
   const onOpenTurnDiffStable = useStableCallback(onOpenTurnDiff);
   const onTimelineRollbackCheckpoint = (input: {
@@ -8905,24 +8897,20 @@ function SideChatPanel(props: {
       useRightPanelStore.getState().closeSurface(parentRef, `aside:${threadId}`);
     }
   }, [gone, parentRef, threadId]);
-  // Files, attachments and pull requests this side chat opens show in the parent's panel.
-  useEffect(() => registerEmbeddedPanelHost(childRef, parentRef), [childRef, parentRef]);
-  // Anything else the user opens in the side chat's own panel, such as a browser
-  // it owns, can't show here. Open the side chat as a full thread so its panel
-  // does, as a turn diff does. Agent-opened surfaces don't count as user actions.
+  // Files, attachments and pull requests this side chat opens show in the
+  // parent's panel. What only its own panel can show, such as a browser it owns
+  // or its turn diff, opens it as a full thread, where that panel renders.
   const navigate = useNavigate();
-  useEffect(() => {
-    const childKey = scopedThreadKey(childRef);
-    return useRightPanelStore.subscribe((state, previous) => {
-      const revision = state.userActionRevisionByThreadKey[childKey] ?? 0;
-      if (revision === (previous.userActionRevisionByThreadKey[childKey] ?? 0)) return;
-      const next = state.byThreadKey[childKey];
-      const before = previous.byThreadKey[childKey];
-      if (!next?.isOpen || next.activeSurfaceId === null) return;
-      if (before?.isOpen && before.activeSurfaceId === next.activeSurfaceId) return;
-      void navigate({ to: "/$environmentId/$threadId", params: buildThreadRouteParams(childRef) });
-    });
-  }, [childRef, navigate]);
+  useEffect(
+    () =>
+      registerEmbeddedPanelHost(childRef, parentRef, () => {
+        void navigate({
+          to: "/$environmentId/$threadId",
+          params: buildThreadRouteParams(childRef),
+        });
+      }),
+    [childRef, navigate, parentRef],
+  );
   if (shell === null || gone) return null;
   return (
     // Its own composer handle, so the host thread's citations, sends and menus

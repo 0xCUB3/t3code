@@ -1,6 +1,6 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { type EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { useClosedViewStore } from "./closedViewStore";
 import {
@@ -130,7 +130,7 @@ describe("rightPanelStore", () => {
 
   it("opens a mounted side chat's files in its parent's panel, and its own once unmounted", () => {
     const store = useRightPanelStore.getState();
-    const unregister = registerEmbeddedPanelHost(refB, refA);
+    const unregister = registerEmbeddedPanelHost(refB, refA, () => undefined);
     store.openFile(refB, "src/app.ts");
     const surfaceIds = (ref: typeof refA) =>
       selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, ref).surfaces.map(
@@ -142,6 +142,40 @@ describe("rightPanelStore", () => {
     unregister();
     store.openFile(refB, "src/other.ts");
     expect(surfaceIds(refB)).toEqual(["file:src/other.ts"]);
+  });
+
+  it("opens a mounted side chat as a full thread only for user opens in its own panel", () => {
+    const store = useRightPanelStore.getState();
+    const opened = vi.fn();
+    const unregister = registerEmbeddedPanelHost(refB, refA, opened);
+    store.openBrowser(refB, "tab-1");
+    // Already selected, as when the session event lands before the user's open.
+    store.openBrowser(refB, "tab-1");
+    expect(opened).toHaveBeenCalledTimes(2);
+
+    opened.mockClear();
+    store.activateSurface(refB, "browser:tab-1");
+    store.openDevice(
+      refB,
+      { hostId: "host", deviceId: "device", platform: "ios", name: "iPhone" },
+      true,
+    );
+    store.openFile(refB, "src/app.ts");
+    expect(opened).not.toHaveBeenCalled();
+    unregister();
+  });
+
+  it("restores a mounted side chat's file into its own panel when asked", () => {
+    const store = useRightPanelStore.getState();
+    const unregister = registerEmbeddedPanelHost(refB, refA, () => undefined);
+    store.openFile(refB, "src/app.ts", undefined, { inOwnPanel: true });
+    const surfaceIds = (ref: typeof refA) =>
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, ref).surfaces.map(
+        (surface) => surface.id,
+      );
+    expect(surfaceIds(refB)).toEqual(["file:src/app.ts"]);
+    expect(surfaceIds(refA)).toEqual([]);
+    unregister();
   });
 
   it("keeps several side chats open as peer tabs and reloads only well-formed ones", () => {
