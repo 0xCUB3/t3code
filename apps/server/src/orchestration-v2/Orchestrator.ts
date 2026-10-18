@@ -3158,10 +3158,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                     wakes: 0,
                   });
           if (watch === existing.watch && links === linked) return thread;
+          const final =
+            command.type === "thread.pull-request-watch.sync" && watch === undefined
+              ? command.endedWatch
+              : undefined;
           return {
             ...thread,
             pullRequests: links.map((link) =>
-              link === existing ? withPullRequestWatch(link, watch) : link,
+              link === existing
+                ? withPullRequestWatch(final ? { ...link, watch: final } : link, watch)
+                : link,
             ),
             updatedAt: command.type === "thread.pull-request.watch" ? now : thread.updatedAt,
           };
