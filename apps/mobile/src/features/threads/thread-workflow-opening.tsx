@@ -12,10 +12,14 @@ import { useState } from "react";
 import { Pressable, View } from "react-native";
 
 import { AppText as Text } from "../../components/ui/AppText";
-import { SymbolView } from "../../components/ui/AppSymbol";
 import { environmentThreadDetails } from "../../state/threads";
+import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
+import { useMarkdownCodeHighlight } from "./markdownCodeHighlightState";
 import { SubagentRow } from "./SubagentRow";
 import { WorkLogBlock } from "./work-log-layout";
+
+// A script longer than this many lines shows its head until opened.
+const FOLDED_SCRIPT_LINES = 10;
 
 /** The workflow opening for a thread, or null; the parent's detail loads only for a workflow. */
 export function useWorkflowOpening(environmentId: EnvironmentId, threadId: ThreadId) {
@@ -67,14 +71,13 @@ function memberRowSubagent(
 
 type WorkflowOpeningValue = NonNullable<ReturnType<typeof useWorkflowOpening>>;
 
-/** Replaces a workflow coordinator's script message: the plan, then the script on demand. */
+/** Replaces a workflow coordinator's script message: the plan, its agents, then the script. */
 export function ThreadWorkflowOpening(props: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly opening: WorkflowOpeningValue;
 }) {
   const navigation = useNavigation();
-  const [scriptOpen, setScriptOpen] = useState(false);
   const { opening } = props;
   const headline = workflowOpeningHeadline(opening);
   const canListMembers = opening.driver !== null && opening.providerInstanceId !== null;
@@ -109,7 +112,7 @@ export function ThreadWorkflowOpening(props: {
   };
   return (
     <WorkLogBlock>
-      <View className="mb-5 gap-2 rounded-xl border border-border bg-card/30 p-3">
+      <View className="mb-5 gap-3">
         <View className="flex-row items-start gap-2">
           <View className="min-w-0 flex-1 gap-0.5">
             <Text className="font-t3-medium text-2xs text-foreground-muted">Workflow started</Text>
@@ -137,25 +140,63 @@ export function ThreadWorkflowOpening(props: {
             ))
           : null}
         {canListMembers ? unphased.map(renderMember) : null}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ expanded: scriptOpen }}
-          onPress={() => setScriptOpen((open) => !open)}
-          className="flex-row items-center gap-1.5 py-1 active:opacity-70"
-        >
-          <Text className="font-t3-medium text-xs text-foreground-muted">View script</Text>
-          <SymbolView
-            name={scriptOpen ? "chevron.up" : "chevron.down"}
-            size={10}
-            tintColorClassName="accent-icon-subtle"
-          />
-        </Pressable>
-        {scriptOpen ? (
-          <Text selectable className="font-mono text-2xs text-foreground-muted">
-            {opening.script}
-          </Text>
-        ) : null}
+        <WorkflowScript script={opening.script} />
       </View>
     </WorkLogBlock>
+  );
+}
+
+/** The script as highlighted code; a long one shows its head until opened. */
+function WorkflowScript(props: { readonly script: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const { themeAppearance } = useAppearancePreferences();
+  const script = props.script.trimEnd();
+  const lines = useMarkdownCodeHighlight({
+    code: script,
+    language: "javascript",
+    theme: themeAppearance,
+    enabled: true,
+  });
+  const lineCount = script.split("\n").length;
+  const canFold = lineCount > FOLDED_SCRIPT_LINES;
+  const shownLines = canFold && !expanded ? FOLDED_SCRIPT_LINES : lineCount;
+  // Tokens are keyed by their offset into the script, like the work log's REPL code.
+  let offset = 0;
+  const highlighted = lines?.slice(0, shownLines).flatMap((line, lineIndex) => {
+    const separator = lineIndex > 0 ? "\n" : "";
+    offset += separator.length;
+    return [
+      separator,
+      ...line.map((token) => {
+        const start = offset;
+        offset += token.content.length;
+        return (
+          <Text key={start} style={token.color ? { color: token.color } : undefined}>
+            {token.content}
+          </Text>
+        );
+      }),
+    ];
+  });
+  return (
+    <View className="gap-1">
+      <View className="rounded-lg bg-subtle px-3 py-2.5">
+        <Text selectable className="font-mono text-2xs leading-normal text-foreground">
+          {highlighted ?? script.split("\n").slice(0, shownLines).join("\n")}
+        </Text>
+      </View>
+      {canFold ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ expanded }}
+          onPress={() => setExpanded((value) => !value)}
+          className="self-start py-1 active:opacity-70"
+        >
+          <Text className="font-t3-medium text-xs text-foreground-muted">
+            {expanded ? "Show less" : "Show full script"}
+          </Text>
+        </Pressable>
+      ) : null}
+    </View>
   );
 }
