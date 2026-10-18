@@ -28,6 +28,7 @@ import Animated, {
   useAnimatedStyle,
   useDerivedValue,
   useSharedValue,
+  withDelay,
   withTiming,
 } from "react-native-reanimated";
 import { AsyncResult } from "effect/reactivity";
@@ -65,6 +66,11 @@ import {
   ANDROID_WORKSPACE_RAIL_WIDTH,
 } from "../workspace/AndroidWorkspaceNavigation";
 import { AndroidWorkspaceSidebar } from "../workspace/AndroidWorkspaceSidebar";
+import {
+  FADE_THROUGH_EASING,
+  FADE_THROUGH_ENTER_MS,
+  FADE_THROUGH_EXIT_MS,
+} from "../workspace/WorkspaceTabTransition";
 import { useAndroidWorkspaceSelection } from "../workspace/useAndroidWorkspaceSelection";
 import { HomeListOptionsProvider } from "../home/home-list-options";
 import { ThreadNavigationSidebar } from "../threads/ThreadNavigationSidebar";
@@ -256,6 +262,7 @@ function AdaptiveWorkspaceLayoutContent(
     null,
   );
   const [primarySidebarSearchQuery, setPrimarySidebarSearchQuery] = useState("");
+  const [railOverlay, setRailOverlay] = useState(false);
   const [focusedAuxiliaryPaneRole, setFocusedAuxiliaryPaneRole] =
     useState<WorkspaceAuxiliaryPaneRole | null>(null);
   const baseLayout = useMemo(
@@ -294,7 +301,8 @@ function AdaptiveWorkspaceLayoutContent(
     [baseLayout, hinge, viewportWidth, navigationRailWidth],
   );
   const width = viewportWidth - navigationRailWidth;
-  const shouldRenderPrimarySidebar = layout.usesSplitView && !workspacePage;
+  // The sidebar stays mounted under a workspace page, so its list is ready on the way back.
+  const shouldRenderPrimarySidebar = layout.usesSplitView;
   const fileInspector = useMemo(
     () =>
       deriveFileInspectorPaneLayout({
@@ -586,14 +594,37 @@ function AdaptiveWorkspaceLayoutContent(
     panes.primarySidebarVisible ? (layout.listPaneWidth ?? 0) + (layout.listPaneGap ?? 0) : 0,
   );
   const renderedRailWidth = useSharedValue(navigationRailWidth);
+  const sidebarFade = useSharedValue(1);
+  const previousWorkspacePage = useRef(workspacePage);
   useEffect(() => {
     if (nativeWorkspace) return;
     const targetWidth = panes.primarySidebarVisible
       ? (layout.listPaneWidth ?? 0) + (layout.listPaneGap ?? 0)
       : 0;
-    renderedSidebarWidth.value = withTiming(targetWidth, WORKSPACE_PANE_TIMING, (finished) => {
+    const settle = (finished?: boolean) => {
+      "worklet";
       if (finished && Platform.OS === "android") runOnJS(settleContentWidth)(contentRevision);
-    });
+    };
+    const pageChanged = previousWorkspacePage.current !== workspacePage;
+    previousWorkspacePage.current = workspacePage;
+    if (!pageChanged) {
+      renderedSidebarWidth.value = withTiming(targetWidth, WORKSPACE_PANE_TIMING, settle);
+    } else if (workspacePage) {
+      // A workspace page covers the panes at once and fades in over them.
+      sidebarFade.value = 0;
+      renderedSidebarWidth.value = withTiming(targetWidth, { duration: 0 }, settle);
+    } else {
+      // Leaving a page is a fade through: the sidebar takes its place once the page has faded
+      // out, then fades in with the detail pane instead of sliding open.
+      renderedSidebarWidth.value = withDelay(
+        FADE_THROUGH_EXIT_MS,
+        withTiming(targetWidth, { duration: 0 }, settle),
+      );
+      sidebarFade.value = withDelay(
+        FADE_THROUGH_EXIT_MS,
+        withTiming(1, { duration: FADE_THROUGH_ENTER_MS, easing: FADE_THROUGH_EASING }),
+      );
+    }
     renderedRailWidth.set(withTiming(navigationRailWidth, WORKSPACE_PANE_TIMING));
   }, [
     nativeWorkspace,
@@ -603,8 +634,10 @@ function AdaptiveWorkspaceLayoutContent(
     panes.primarySidebarVisible,
     renderedSidebarWidth,
     renderedRailWidth,
+    sidebarFade,
     settleContentWidth,
     contentRevision,
+    workspacePage,
   ]);
   const railAnimatedStyle = useAnimatedStyle(() => ({ width: renderedRailWidth.value }));
   // Showing or hiding the sidebar clips a fixed-width list. A hinge resize instead tracks the
@@ -618,7 +651,8 @@ function AdaptiveWorkspaceLayoutContent(
   }));
   const sidebarAnimatedStyle = useAnimatedStyle(() => ({
     // Fading a UIKit glass ancestor can leave remounted header effects missing.
-    opacity: Platform.OS === "ios" ? 1 : Math.min(1, renderedSidebarWidth.value / 80),
+    opacity:
+      Platform.OS === "ios" ? 1 : Math.min(1, renderedSidebarWidth.value / 80) * sidebarFade.value,
     width: renderedSidebarWidth.value,
   }));
 
@@ -749,15 +783,7 @@ function AdaptiveWorkspaceLayoutContent(
           >
             <AndroidHingeObserver onChange={handleHingeChange} />
             {shouldRenderNavigationRail ? (
-              <Animated.View
-                className="self-stretch overflow-hidden"
-                accessibilityElementsHidden={navigationRailWidth === 0}
-                importantForAccessibility={navigationRailWidth > 0 ? "auto" : "no-hide-descendants"}
-                pointerEvents={navigationRailWidth > 0 ? "auto" : "none"}
-                style={railAnimatedStyle}
-              >
-                <AndroidWorkspaceNavigation rail onSelect={revealPrimarySidebar} />
-              </Animated.View>
+              <Animated.View className="self-stretch" style={railAnimatedStyle} />
             ) : null}
             {shouldRenderPrimarySidebar && layout.listPaneWidth !== null ? (
               <Animated.View
@@ -839,6 +865,20 @@ function AdaptiveWorkspaceLayoutContent(
               setAuxiliaryPaneWidth={setAuxiliaryPaneWidth}
               onClosed={handleWorkspaceInspectorClosed}
             />
+            {shouldRenderNavigationRail && navigationRailWidth > 0 ? (
+              // The rail reserves its slot above and draws over the panes, so it can widen over
+              // the list in place. It takes the whole workspace only while it is open.
+              <View
+                className="absolute inset-y-0 left-0"
+                style={railOverlay ? { right: 0 } : { width: navigationRailWidth }}
+              >
+                <AndroidWorkspaceNavigation
+                  rail
+                  onSelect={revealPrimarySidebar}
+                  onOverlayChange={setRailOverlay}
+                />
+              </View>
+            ) : null}
           </View>
         </WindowHingeContext>
       </AdaptiveWorkspaceContext.Provider>

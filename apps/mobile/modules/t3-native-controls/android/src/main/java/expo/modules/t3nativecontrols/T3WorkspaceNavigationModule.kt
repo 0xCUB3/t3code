@@ -2,62 +2,66 @@ package expo.modules.t3nativecontrols
 
 import android.content.Context
 import android.view.ViewGroup
+import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalWideNavigationRail
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.Scrim
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.WideNavigationRailDefaults
-import androidx.compose.material3.WideNavigationRailItem
-import androidx.compose.material3.WideNavigationRailItemDefaults
-import androidx.compose.material3.WideNavigationRailState
-import androidx.compose.material3.WideNavigationRailValue
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
-import androidx.compose.material3.rememberWideNavigationRailState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.ComposeView
-import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
 
 private val TABS = listOf("threads", "pullRequests", "settings")
 
@@ -76,6 +80,9 @@ class T3WorkspaceNavigationModule : Module() {
       }
       Prop("safeAreaTop") { view: T3WorkspaceNavigationView, value: Float ->
         view.safeAreaTop = value
+      }
+      Prop("safeAreaBottom") { view: T3WorkspaceNavigationView, value: Float ->
+        view.safeAreaBottom = value
       }
       Prop("headerHeight") { view: T3WorkspaceNavigationView, value: Float ->
         view.headerHeight = value
@@ -98,13 +105,12 @@ class T3WorkspaceNavigationModule : Module() {
       Prop("actionContentColor") { view: T3WorkspaceNavigationView, value: Int ->
         view.actionContentColor = value
       }
-      Events("onTabSelected", "onNewThread")
+      Events("onTabSelected", "onNewThread", "onOverlayChange")
     }
   }
 }
 
 /** One Material3 selection surface moves from below the list to its leading edge. */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 class T3WorkspaceNavigationView(
   context: Context,
   appContext: AppContext
@@ -114,12 +120,14 @@ class T3WorkspaceNavigationView(
 
   private val onTabSelected by EventDispatcher()
   private val onNewThread by EventDispatcher()
+  private val onOverlayChange by EventDispatcher()
   var selectedTab by mutableStateOf("threads")
   var rail by mutableStateOf(false)
   var dark by mutableStateOf(false)
   var textScale by mutableStateOf(1f)
   var newEnabled by mutableStateOf(false)
   var safeAreaTop by mutableStateOf(0f)
+  var safeAreaBottom by mutableStateOf(0f)
   var headerHeight by mutableStateOf(56f)
   var containerColor by mutableStateOf(0)
   var selectedColor by mutableStateOf(0)
@@ -171,7 +179,7 @@ class T3WorkspaceNavigationView(
                   NavigationBarItem(
                     selected = selectedTab == tab,
                     onClick = { onTabSelected(mapOf("tab" to tab)) },
-                    icon = { tabIcon(tab) },
+                    icon = { Icon(tabIconPainter(tab), contentDescription = null) },
                     label = { Text(tabTitle(tab), fontSize = (12 * textScale).sp) },
                     colors = NavigationBarItemDefaults.colors(
                       selectedIconColor = Color(selectedColor),
@@ -193,152 +201,156 @@ class T3WorkspaceNavigationView(
 
   @Composable
   private fun rail() {
-    val railState = rememberWideNavigationRailState()
-    val scope = rememberCoroutineScope()
-    // ModalWideNavigationRail only widens its modal copy once its own position animation
-    // passes 0.3; mirroring that gate keeps the labels and the FAB from expanding before the
-    // container does. Collapsing starts at once so they finish before the modal window closes.
-    val opening = railState.targetValue == WideNavigationRailValue.Expanded
-    val modalProgress by animateFloatAsState(
-      targetValue = if (opening) 1f else 0f,
-      animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
-    )
-    val expanding = opening && modalProgress >= MODAL_EXPANDED_THRESHOLD
-    // The header and items compose twice: in the inline rail that stays under the scrim and in
-    // the modal's dialog window. Only the dialog copy may expand, or the inline rail reflows.
-    val hostView = LocalView.current
-    ModalWideNavigationRail(
-      modifier = Modifier.fillMaxHeight(),
-      state = railState,
-      expandedHeaderTopPadding = safeAreaTop.dp,
-      contentPadding = PaddingValues(bottom = 12.dp),
-      header = {
-        railHeader(railState, expanding && LocalView.current !== hostView, scope)
-      },
-      colors = WideNavigationRailDefaults.colors(
-        containerColor = Color(containerColor),
-        contentColor = Color(unselectedColor),
-        modalContainerColor = Color(containerColor),
-        modalContentColor = Color(unselectedColor),
-      ),
-      windowInsets = WindowInsets(0),
-      // Menu and New thread stay top-aligned while destinations center like Material's rail.
-      arrangement = Arrangement.Center,
-    ) {
-      railItems(railState, expanding && LocalView.current !== hostView, scope)
-    }
-  }
-
-  @Composable
-  private fun railHeader(
-    railState: WideNavigationRailState,
-    expanded: Boolean,
-    scope: CoroutineScope
-  ) {
-    Column(
-      modifier = Modifier.padding(start = 20.dp),
-      verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-      // As tall as the list toolbar so the menu lines up with the toolbar's actions.
-      Box(Modifier.height(headerHeight.dp), contentAlignment = Alignment.CenterStart) {
-        IconButton(
-          onClick = { scope.launch { railState.toggle() } },
-          modifier = Modifier.padding(start = 4.dp).semantics {
-            contentDescription =
-              if (expanded) "Collapse navigation rail" else "Expand navigation rail"
-          },
-        ) {
-          Icon(
-            painterResource(R.drawable.t3_menu),
-            contentDescription = null,
-            tint = Color(unselectedColor)
-          )
-        }
-      }
-      ExtendedFloatingActionButton(
-        onClick = {
-          if (newEnabled) {
-            scope.launch {
-              railState.collapse()
-              onNewThread(emptyMap<String, Any>())
-            }
-          }
-        },
-        expanded = expanded,
-        icon = { Icon(painterResource(R.drawable.t3_new_thread), contentDescription = null) },
-        text = { Text("New thread") },
-        modifier = Modifier.height(56.dp).alpha(if (newEnabled) 1f else DISABLED_ALPHA).semantics {
-          contentDescription = "New thread"
-          if (!newEnabled) disabled()
-        },
-        containerColor = Color(actionColor),
-        contentColor = Color(actionContentColor),
-      )
-    }
-  }
-
-  @Composable
-  private fun railItems(
-    railState: WideNavigationRailState,
-    expanded: Boolean,
-    scope: CoroutineScope
-  ) {
-    // The collapsed rail shows icons only. Material does not animate an item between having no
-    // label and having one, so the label always exists and grows from zero size on the item's
-    // own spatial spring, while the collapsed indicator pads the icon to the same circle as an
-    // unlabelled item. The circle then stretches into the expanded pill without a jump.
-    val labelProgress by animateFloatAsState(
-      targetValue = if (expanded) 1f else 0f,
+    // One rail surface widens in place over the list. Material's ModalWideNavigationRail
+    // instead moves its destinations into a dialog window copy, which blanks them for a few
+    // frames while the window attaches and lays them out at a different height.
+    var expanded by remember { mutableStateOf(false) }
+    // React Native sizes this view to the rail. While the rail is open it spans the workspace,
+    // and it only widens once the host has made room, so the surface is never clipped.
+    var roomy by remember { mutableStateOf(false) }
+    val progress by animateFloatAsState(
+      targetValue = if (expanded && roomy) 1f else 0f,
       animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
     )
-    val indicatorPadding = WideNavigationRailItemDefaults.indicatorPadding(
-      railExpanded = expanded,
-      collapsedPadding = PaddingValues(ICON_ONLY_INDICATOR_PADDING),
-    )
-    TABS.forEach { tab ->
-      WideNavigationRailItem(
-        selected = selectedTab == tab,
-        onClick = {
-          scope.launch {
-            railState.collapse()
+    val overlay = expanded || progress != 0f
+    LaunchedEffect(overlay) { onOverlayChange(mapOf("overlay" to overlay)) }
+    // The activity handles Back before React Native, so an open rail closes first.
+    val backDispatcher = (appContext.currentActivity as? ComponentActivity)?.onBackPressedDispatcher
+    DisposableEffect(backDispatcher, expanded) {
+      val callback = object : OnBackPressedCallback(expanded) {
+        override fun handleOnBackPressed() {
+          expanded = false
+        }
+      }
+      backDispatcher?.addCallback(callback)
+      onDispose { callback.remove() }
+    }
+    val density = LocalDensity.current
+    Box(
+      Modifier.fillMaxSize().onSizeChanged {
+        roomy = with(density) { it.width.toDp() } >= EXPANDED_RAIL_WIDTH
+      },
+    ) {
+      val fraction = progress.coerceIn(0f, 1f)
+      if (fraction > 0f) {
+        Scrim(
+          contentDescription = "Close navigation rail",
+          onClick = { expanded = false },
+          alpha = { fraction },
+        )
+      }
+      Column(
+        Modifier
+          .fillMaxHeight()
+          .width(lerp(RAIL_WIDTH, EXPANDED_RAIL_WIDTH, progress.coerceAtLeast(0f)))
+          .shadow(RAIL_SHADOW * fraction, RAIL_EXPANDED_SHAPE, clip = false)
+          .background(Color(containerColor), RAIL_EXPANDED_SHAPE)
+          .padding(top = safeAreaTop.dp, bottom = safeAreaBottom.dp + 12.dp)
+          .selectableGroup(),
+      ) {
+        // As tall as the list toolbar so the menu lines up with the toolbar's actions.
+        Box(
+          Modifier.height(headerHeight.dp).padding(start = RAIL_INSET),
+          contentAlignment = Alignment.CenterStart,
+        ) {
+          IconButton(
+            onClick = { expanded = !expanded },
+            modifier = Modifier.semantics {
+              contentDescription =
+                if (expanded) "Collapse navigation rail" else "Expand navigation rail"
+            },
+          ) {
+            Icon(
+              painterResource(R.drawable.t3_menu),
+              contentDescription = null,
+              tint = Color(unselectedColor),
+            )
+          }
+        }
+        newThreadButton(fraction) {
+          expanded = false
+          onNewThread(emptyMap<String, Any>())
+        }
+        Spacer(Modifier.weight(1f))
+        TABS.forEach { tab ->
+          railItem(tab, fraction) {
+            expanded = false
             onTabSelected(mapOf("tab" to tab))
           }
-        },
-        railExpanded = expanded,
-        // Accessibility skips the zero-sized label, so the icon names the collapsed item.
-        icon = { tabIcon(tab, if (expanded) null else expandedTabTitle(tab)) },
-        label = {
-          Text(
-            expandedTabTitle(tab),
-            Modifier
-              .layout { measurable, constraints ->
-                val placeable = measurable.measure(constraints)
-                // Full size by the time the label appears, so the rail never clips it.
-                val scale = (labelProgress / LABEL_SHOW_PROGRESS).coerceIn(0f, 1f)
-                layout(
-                  (placeable.width * scale).roundToInt(),
-                  (placeable.height * scale).roundToInt(),
-                ) {
-                  placeable.place(0, 0)
-                }
-              }
-              // Material draws the label opaque under the icon at rest and slides it across the
-              // icon after the spring's midpoint, so it stays hidden until then and fades in.
-              .graphicsLayer {
-                alpha = ((labelProgress - LABEL_SHOW_PROGRESS) / LABEL_FADE_SPAN).coerceIn(0f, 1f)
-              },
-            fontSize = (14 * textScale).sp,
-          )
-        },
-        indicatorPadding = indicatorPadding,
-        colors = WideNavigationRailItemDefaults.colors(
-          selectedIconColor = Color(selectedColor),
-          selectedTextColor = Color(selectedColor),
-          selectedIndicatorColor = Color(indicatorColor),
-          unselectedIconColor = Color(unselectedColor),
-          unselectedTextColor = Color(unselectedColor),
-        ),
-      )
+        }
+        Spacer(Modifier.weight(1f))
+      }
+    }
+  }
+
+  /** The collapsed FAB widens with the rail and reveals its label as it goes. */
+  @Composable
+  private fun newThreadButton(fraction: Float, onClick: () -> Unit) {
+    Surface(
+      onClick = onClick,
+      enabled = newEnabled,
+      shape = MaterialTheme.shapes.large,
+      color = Color(actionColor),
+      contentColor = Color(actionContentColor),
+      shadowElevation = 3.dp,
+      modifier = Modifier
+        .padding(start = RAIL_INSET, top = 12.dp)
+        .height(FAB_SIZE)
+        .width(lerp(FAB_SIZE, EXPANDED_RAIL_WIDTH - RAIL_INSET * 2, fraction))
+        .alpha(if (newEnabled) 1f else DISABLED_ALPHA)
+        .semantics { contentDescription = "New thread" },
+    ) {
+      Row(
+        Modifier.padding(start = (FAB_SIZE - ICON_SIZE) / 2).clipToBounds(),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Icon(painterResource(R.drawable.t3_new_thread), contentDescription = null)
+        Text(
+          "New thread",
+          Modifier.padding(start = 12.dp).alpha(labelAlpha(fraction)).clearAndSetSemantics {},
+          style = MaterialTheme.typography.labelLarge,
+          fontSize = (14 * textScale).sp,
+          maxLines = 1,
+          softWrap = false,
+        )
+      }
+    }
+  }
+
+  /**
+   * A destination whose indicator stretches from a circle around the icon into a pill around
+   * the icon and label. The icon never moves, so the collapsed and expanded rails share it.
+   */
+  @Composable
+  private fun railItem(tab: String, fraction: Float, onClick: () -> Unit) {
+    val selected = selectedTab == tab
+    val title = expandedTabTitle(tab)
+    val tint = Color(if (selected) selectedColor else unselectedColor)
+    Box(
+      Modifier
+        .padding(start = RAIL_INSET, bottom = 4.dp)
+        .height(ITEM_HEIGHT)
+        .width(lerp(ITEM_HEIGHT, EXPANDED_RAIL_WIDTH - RAIL_INSET * 2, fraction))
+        .clip(CircleShape)
+        .background(if (selected) Color(indicatorColor) else Color.Transparent)
+        .selectable(selected = selected, role = Role.Tab, onClick = onClick)
+        .semantics { contentDescription = title },
+    ) {
+      Row(
+        Modifier.fillMaxHeight().padding(start = (ITEM_HEIGHT - ICON_SIZE) / 2).clipToBounds(),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Icon(tabIconPainter(tab), contentDescription = null, tint = tint)
+        Text(
+          title,
+          Modifier.padding(start = 12.dp).alpha(labelAlpha(fraction)).clearAndSetSemantics {},
+          color = tint,
+          style = MaterialTheme.typography.labelLarge,
+          fontSize = (14 * textScale).sp,
+          maxLines = 1,
+          softWrap = false,
+        )
+      }
     }
   }
 
@@ -352,23 +364,28 @@ class T3WorkspaceNavigationView(
     if (tab == "pullRequests") "Pull Requests" else tabTitle(tab)
 
   @Composable
-  private fun tabIcon(tab: String, contentDescription: String? = null) {
-    val drawable = when (tab) {
+  private fun tabIconPainter(tab: String) = painterResource(
+    when (tab) {
       "threads" -> R.drawable.t3_chats
       "pullRequests" -> R.drawable.t3_pull_requests
       else -> R.drawable.t3_settings
     }
-    // A visible label names the destination, so only an icon-only item needs a description.
-    Icon(painter = painterResource(drawable), contentDescription = contentDescription)
-  }
+  )
 
   private companion object {
-    const val MODAL_EXPANDED_THRESHOLD = 0.3f
-    const val LABEL_SHOW_PROGRESS = 0.5f
-    const val LABEL_FADE_SPAN = 0.35f
-
-    // Material's padding for an unlabelled rail item, which makes its indicator a circle.
-    val ICON_ONLY_INDICATOR_PADDING = 16.dp
+    // Material's 80dp compact rail, minus 8dp: still a 48dp touch target with 12dp margins.
+    val RAIL_WIDTH = 72.dp
+    val EXPANDED_RAIL_WIDTH = 240.dp
+    val RAIL_INSET = 12.dp
+    val ITEM_HEIGHT = 48.dp
+    val FAB_SIZE = 48.dp
+    val ICON_SIZE = 24.dp
+    val RAIL_SHADOW = 6.dp
+    val RAIL_EXPANDED_SHAPE = RoundedCornerShape(topEnd = 16.dp, bottomEnd = 16.dp)
     const val DISABLED_ALPHA = 0.4f
+
+    // Labels fade in over the second half of the widening, once there is room for them, and
+    // fade out over the first half of the narrowing, before the surface clips them.
+    fun labelAlpha(fraction: Float) = ((fraction - 0.5f) / 0.5f).coerceIn(0f, 1f)
   }
 }

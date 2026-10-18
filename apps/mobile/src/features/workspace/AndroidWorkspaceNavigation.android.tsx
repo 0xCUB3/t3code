@@ -22,8 +22,8 @@ import { useAppearancePreferences } from "../settings/appearance/AppearancePrefe
 import { useAndroidWorkspaceRoot } from "./AndroidWorkspaceTabsProvider";
 import { useWorkspaceTabs } from "./WorkspaceTabsContext";
 
-// Material's collapsed wide navigation rail is a fixed 96dp.
-export const ANDROID_WORKSPACE_RAIL_WIDTH = 96;
+// Matches RAIL_WIDTH in the native rail.
+export const ANDROID_WORKSPACE_RAIL_WIDTH = 72;
 
 interface NativeNavigationProps extends ViewProps {
   readonly rail: boolean;
@@ -32,6 +32,7 @@ interface NativeNavigationProps extends ViewProps {
   readonly textScale: number;
   readonly newEnabled: boolean;
   readonly safeAreaTop: number;
+  readonly safeAreaBottom: number;
   readonly headerHeight: number;
   readonly containerColor: number;
   readonly selectedColor: number;
@@ -43,6 +44,7 @@ interface NativeNavigationProps extends ViewProps {
     event: NativeSyntheticEvent<{ readonly tab: AndroidWorkspaceNavigationTab }>,
   ) => void;
   readonly onNewThread: () => void;
+  readonly onOverlayChange: (event: NativeSyntheticEvent<{ readonly overlay: boolean }>) => void;
 }
 
 const NativeNavigation = requireNativeView<NativeNavigationProps>("T3WorkspaceNavigation");
@@ -55,6 +57,8 @@ function nativeColor(value: string) {
 export function AndroidWorkspaceNavigation(props: {
   readonly rail?: boolean;
   readonly onSelect?: () => void;
+  /** The rail needs the whole workspace while it widens over the list. */
+  readonly onOverlayChange?: (overlay: boolean) => void;
 }) {
   const workspace = useWorkspaceTabs()!;
   const root = useAndroidWorkspaceRoot();
@@ -75,17 +79,11 @@ export function AndroidWorkspaceNavigation(props: {
 
   return (
     <View
-      style={{
-        backgroundColor: containerColor,
-        ...(rail
-          ? {
-              flex: 1,
-              width: ANDROID_WORKSPACE_RAIL_WIDTH,
-              paddingTop: toolbar.paddingTop,
-              paddingBottom: insets.bottom,
-            }
-          : { paddingBottom: insets.bottom }),
-      }}
+      style={
+        // The rail draws its own surface and pads the system bars; while open it spans the
+        // workspace, so the rest of it must stay transparent.
+        rail ? { flex: 1 } : { backgroundColor: containerColor, paddingBottom: insets.bottom }
+      }
     >
       <NativeNavigation
         rail={rail}
@@ -94,6 +92,7 @@ export function AndroidWorkspaceNavigation(props: {
         textScale={scale}
         newEnabled={connectionState.hasConnections}
         safeAreaTop={toolbar.paddingTop}
+        safeAreaBottom={insets.bottom}
         headerHeight={toolbar.height}
         containerColor={nativeColor(containerColor)}
         selectedColor={nativeColor(selectedColor)}
@@ -120,6 +119,7 @@ export function AndroidWorkspaceNavigation(props: {
           Keyboard.dismiss();
           navigation.navigate("NewTaskSheet", { screen: "NewTask" });
         }}
+        onOverlayChange={(event) => props.onOverlayChange?.(event.nativeEvent.overlay)}
         style={rail ? { flex: 1 } : { height: 80 * Math.max(1, scale) }}
       />
     </View>

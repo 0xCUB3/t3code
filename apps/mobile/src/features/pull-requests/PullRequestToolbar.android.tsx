@@ -57,7 +57,6 @@ export function PullRequestToolbar(props: { readonly onRequestVisibility?: () =>
   }, [searching, closeSearch, listFocused, navigation, isTabActive]);
   return (
     <AndroidScreenHeader
-      listToolbar
       title="Pull requests"
       titleContent={
         searching ? (
