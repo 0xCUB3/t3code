@@ -2847,6 +2847,8 @@ export default function ChatView(props: ChatViewProps) {
     activeThreadKey,
     nextEntries: timelineEntries,
     rememberedForActive: peekRememberedThreadTimeline<typeof timelineEntries>(activeThreadKey),
+    // A side chat loading next to its parent must never paint the parent's messages.
+    allowOtherThread: !embedded,
   });
   const displayedTimelineKey = displayedTimeline.displayThreadKey ?? routeThreadKey;
   const paintOnlyDisplayedTimeline = isPaintOnlyThreadTimeline(
@@ -3018,13 +3020,23 @@ export default function ChatView(props: ChatViewProps) {
     ) {
       return;
     }
-    rememberReadyThreadTimeline({
-      threadKey: activeThreadKey,
-      entries: timelineEntries,
-      markdownCwd: gitCwd,
-      workspaceRoot: activeWorkspaceRoot ?? null,
-    });
-  }, [activeThreadKey, activeWorkspaceRoot, gitCwd, threadDetailLoading, timelineEntries]);
+    rememberReadyThreadTimeline(
+      {
+        threadKey: activeThreadKey,
+        entries: timelineEntries,
+        markdownCwd: gitCwd,
+        workspaceRoot: activeWorkspaceRoot ?? null,
+      },
+      { asLastReady: !embedded },
+    );
+  }, [
+    activeThreadKey,
+    activeWorkspaceRoot,
+    embedded,
+    gitCwd,
+    threadDetailLoading,
+    timelineEntries,
+  ]);
   const heldPaintContext = paintOnlyDisplayedTimeline
     ? peekHeldThreadTimeline<typeof timelineEntries>()
     : null;
@@ -8893,8 +8905,24 @@ function SideChatPanel(props: {
       useRightPanelStore.getState().closeSurface(parentRef, `aside:${threadId}`);
     }
   }, [gone, parentRef, threadId]);
-  // Files and attachments this side chat opens show in the parent's panel.
+  // Files, attachments and pull requests this side chat opens show in the parent's panel.
   useEffect(() => registerEmbeddedPanelHost(childRef, parentRef), [childRef, parentRef]);
+  // Anything else the user opens in the side chat's own panel, such as a browser
+  // it owns, can't show here. Open the side chat as a full thread so its panel
+  // does, as a turn diff does. Agent-opened surfaces don't count as user actions.
+  const navigate = useNavigate();
+  useEffect(() => {
+    const childKey = scopedThreadKey(childRef);
+    return useRightPanelStore.subscribe((state, previous) => {
+      const revision = state.userActionRevisionByThreadKey[childKey] ?? 0;
+      if (revision === (previous.userActionRevisionByThreadKey[childKey] ?? 0)) return;
+      const next = state.byThreadKey[childKey];
+      const before = previous.byThreadKey[childKey];
+      if (!next?.isOpen || next.activeSurfaceId === null) return;
+      if (before?.isOpen && before.activeSurfaceId === next.activeSurfaceId) return;
+      void navigate({ to: "/$environmentId/$threadId", params: buildThreadRouteParams(childRef) });
+    });
+  }, [childRef, navigate]);
   if (shell === null || gone) return null;
   return (
     // Its own composer handle, so the host thread's citations, sends and menus

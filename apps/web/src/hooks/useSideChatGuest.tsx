@@ -63,6 +63,8 @@ export function useSideChatGuest(input: {
       if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
       if (eventPathContainsSelector(event, TYPE_TO_FOCUS_EDITABLE_SELECTOR)) return;
       if (document.querySelector(TYPE_TO_FOCUS_FLOATING_LAYER_SELECTOR)) return;
+      // A fullscreen app takes Escape to leave fullscreen.
+      if (document.querySelector("[data-mcp-app-fullscreen]")) return;
       event.preventDefault();
       useSideChatFocusStore.getState().release(parentKey, threadId);
     };

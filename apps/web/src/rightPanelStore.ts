@@ -272,7 +272,7 @@ export function registerEmbeddedPanelHost(
 }
 
 /** The thread whose right panel shows what `ref` opens: its embedding host, or itself. */
-export function panelOwnerOf(ref: ScopedThreadRef): ScopedThreadRef {
+function panelOwnerOf(ref: ScopedThreadRef): ScopedThreadRef {
   return embeddedPanelHosts.get(scopedThreadKey(ref)) ?? ref;
 }
 
