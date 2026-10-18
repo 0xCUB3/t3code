@@ -25,6 +25,7 @@ import { BrowserControlInterrupted } from "./SessionControl.ts";
 
 const MAX_EVALUATION_BYTES = 64_000;
 const MAX_VISIBLE_TEXT_LENGTH = 20_000;
+const MAX_SCREENSHOT_DIMENSION = 1280;
 const WAIT_POLL_MS = 100;
 export const DIAGNOSTIC_BUFFER_LIMIT = 200;
 
@@ -386,9 +387,35 @@ export const captureViewport = async (
   return data;
 };
 
+// Resize after capture in an isolated encoder page. Scaling CDP's clip changes the
+// target's rendering scale; resizing the pixels does not touch the target or its streams.
+const captureSnapshot = async (cdp: CDPSession, imagePage: () => Promise<Page>) => {
+  const data = await captureViewport(cdp, { format: "png" });
+  const { width, height } = pngDimensions(Buffer.from(data, "base64"));
+  const scale = Math.min(1, MAX_SCREENSHOT_DIMENSION / Math.max(width, height));
+  if (scale === 1) return data;
+  const encoder = await imagePage();
+  try {
+    return await encoder.evaluate<string>(`(async () => {
+      const image = new Image();
+      image.src = ${JSON.stringify(`data:image/png;base64,${data}`)};
+      await image.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = ${Math.max(1, Math.round(width * scale))};
+      canvas.height = ${Math.max(1, Math.round(height * scale))};
+      const context = canvas.getContext("2d");
+      context.imageSmoothingQuality = "high";
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL("image/png").split(",")[1];
+    })()`);
+  } finally {
+    await encoder.close();
+  }
+};
 type SnapshotInput = {
   readonly page: Page;
   readonly cdp: CDPSession;
+  readonly imagePage: () => Promise<Page>;
   readonly consoleEntries: ReadonlyArray<PreviewAutomationConsoleEntry>;
   readonly networkEntries: ReadonlyArray<PreviewAutomationNetworkEntry>;
   readonly actionTimeline: PreviewAutomationSnapshot["actionTimeline"];
@@ -412,7 +439,7 @@ const capture = async (
         "url" | "title" | "loading" | "visibleText" | "interactiveElements"
       >
     >,
-    captureViewport(input.cdp, { format: "png" }),
+    captureSnapshot(input.cdp, input.imagePage),
   ]);
   void pageAndScreenshot.catch(constVoid);
   // Leaves time for the second read; a frame that never loads holds the tree until then.

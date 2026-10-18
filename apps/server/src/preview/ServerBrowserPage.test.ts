@@ -5,7 +5,16 @@ import {
   type CDPSession,
   type Page,
 } from "playwright-core";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 
 import { presentAsChrome } from "./ServerBrowserContexts.ts";
 import * as ServerBrowserPage from "./ServerBrowserPage.ts";
@@ -35,6 +44,7 @@ describe("server browser element refs", () => {
     ServerBrowserPage.snapshot({
       page,
       cdp,
+      imagePage: () => browser.newPage(),
       consoleEntries: [],
       networkEntries: [],
       actionTimeline: [],
@@ -56,31 +66,42 @@ describe("server browser element refs", () => {
   };
   const repeatedRows = `<ul>${Array.from({ length: 5 }, (_, i) => `<li>row ${i + 1}<button data-testid="delete-row" onclick="this.parentElement.remove()">delete</button></li>`).join("")}</ul>`;
 
-  it("captures snapshots at the page's device scale and reports the PNG's own size", async () => {
+  it.each([
+    { width: 1280, height: 800, outputHeight: 800 },
+    { width: 3840, height: 2160, outputHeight: 720 },
+  ])("bounds native snapshots of $width x $height", async ({ width, height, outputHeight }) => {
     // Scaled captures make Chromium re-render at a new scale, which a hidden desktop
-    // webview can't do, so they came back blurry. Snapshots now keep device pixels.
+    // webview can't do, so they came back blurry. Resize only after native capture.
     // Raw CDP captures follow the device scale only when it's forced, as the server does.
     const hiDpiBrowser = await chromium.launch({
       headless: true,
       args: ["--force-device-scale-factor=2"],
     });
     const hiDpi = await hiDpiBrowser.newContext({
-      viewport: { width: 1280, height: 800 },
+      viewport: { width, height },
       deviceScaleFactor: 2,
     });
     try {
       const hiDpiPage = await hiDpi.newPage();
       await hiDpiPage.setContent("<p>sharp</p>");
+      const hiDpiCdp = await hiDpi.newCDPSession(hiDpiPage);
+      const send = vi.spyOn(hiDpiCdp, "send");
       const { screenshot } = await ServerBrowserPage.snapshot({
         page: hiDpiPage,
-        cdp: await hiDpi.newCDPSession(hiDpiPage),
+        cdp: hiDpiCdp,
+        imagePage: () => hiDpiBrowser.newPage(),
         consoleEntries: [],
         networkEntries: [],
         actionTimeline: [],
       });
+      expect(send.mock.calls.filter(([method]) => method === "Page.captureScreenshot")).toEqual([
+        ["Page.captureScreenshot", { format: "png" }],
+      ]);
+      expect(await hiDpiPage.evaluate("devicePixelRatio")).toBe(2);
+      expect(hiDpiPage.viewportSize()).toEqual({ width, height });
       const png = Buffer.from(screenshot.data, "base64");
-      expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([2560, 1600]);
-      expect([screenshot.width, screenshot.height]).toEqual([2560, 1600]);
+      expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([1280, outputHeight]);
+      expect([screenshot.width, screenshot.height]).toEqual([1280, outputHeight]);
     } finally {
       await hiDpiBrowser.close();
     }

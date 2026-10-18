@@ -1866,7 +1866,9 @@ const make = Effect.gen(function* () {
         return { tabId: tab.tabId, colorScheme };
       }
       case "snapshot": {
-        return withCaptureLock(tab, () => ServerBrowserPage.snapshot(tab));
+        return withCaptureLock(tab, () =>
+          ServerBrowserPage.snapshot({ ...tab, imagePage: () => contexts.scratchPage() }),
+        );
       }
       case "click": {
         const clickInput = input as PreviewAutomationClickInput;
