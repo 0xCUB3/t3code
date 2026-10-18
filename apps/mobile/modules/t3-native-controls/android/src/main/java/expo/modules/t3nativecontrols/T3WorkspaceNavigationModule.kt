@@ -39,6 +39,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.ViewCompositionStrategy
@@ -55,6 +57,7 @@ import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 private val TABS = listOf("threads", "pullRequests", "settings")
 
@@ -280,21 +283,18 @@ class T3WorkspaceNavigationView(
     expanded: Boolean,
     scope: CoroutineScope
   ) {
-    // WideNavigationRailItem slides its label from under the icon to beside it on a spatial
-    // spring and fades the label to zero at that spring's midpoint, so the text and size can
-    // swap there without a visible jump. The item does not re-fade for the swap, so the longer
-    // label fades back in by hand while it finishes sliding across.
+    // The collapsed rail shows icons only. Material does not animate an item between having no
+    // label and having one, so the label always exists and grows from zero size on the item's
+    // own spatial spring, while the collapsed indicator pads the icon to the same circle as an
+    // unlabelled item. The circle then stretches into the expanded pill without a jump.
     val labelProgress by animateFloatAsState(
       targetValue = if (expanded) 1f else 0f,
       animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
     )
-    val expandedLabel = labelProgress >= LABEL_SWAP_PROGRESS
-    val labelAlpha =
-      if (expandedLabel) {
-        ((labelProgress - LABEL_SWAP_PROGRESS) / LABEL_FADE_SPAN).coerceIn(0f, 1f)
-      } else {
-        1f
-      }
+    val indicatorPadding = WideNavigationRailItemDefaults.indicatorPadding(
+      railExpanded = expanded,
+      collapsedPadding = PaddingValues(ICON_ONLY_INDICATOR_PADDING),
+    )
     TABS.forEach { tab ->
       WideNavigationRailItem(
         selected = selectedTab == tab,
@@ -305,14 +305,32 @@ class T3WorkspaceNavigationView(
           }
         },
         railExpanded = expanded,
-        icon = { tabIcon(tab) },
+        // Accessibility skips the zero-sized label, so the icon names the collapsed item.
+        icon = { tabIcon(tab, if (expanded) null else expandedTabTitle(tab)) },
         label = {
           Text(
-            if (expandedLabel) expandedTabTitle(tab) else tabTitle(tab),
-            Modifier.alpha(labelAlpha),
-            fontSize = ((if (expandedLabel) 14 else 12) * textScale).sp,
+            expandedTabTitle(tab),
+            Modifier
+              .layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints)
+                // Full size by the time the label appears, so the rail never clips it.
+                val scale = (labelProgress / LABEL_SHOW_PROGRESS).coerceIn(0f, 1f)
+                layout(
+                  (placeable.width * scale).roundToInt(),
+                  (placeable.height * scale).roundToInt(),
+                ) {
+                  placeable.place(0, 0)
+                }
+              }
+              // Material draws the label opaque under the icon at rest and slides it across the
+              // icon after the spring's midpoint, so it stays hidden until then and fades in.
+              .graphicsLayer {
+                alpha = ((labelProgress - LABEL_SHOW_PROGRESS) / LABEL_FADE_SPAN).coerceIn(0f, 1f)
+              },
+            fontSize = (14 * textScale).sp,
           )
         },
+        indicatorPadding = indicatorPadding,
         colors = WideNavigationRailItemDefaults.colors(
           selectedIconColor = Color(selectedColor),
           selectedTextColor = Color(selectedColor),
@@ -334,20 +352,23 @@ class T3WorkspaceNavigationView(
     if (tab == "pullRequests") "Pull Requests" else tabTitle(tab)
 
   @Composable
-  private fun tabIcon(tab: String) {
+  private fun tabIcon(tab: String, contentDescription: String? = null) {
     val drawable = when (tab) {
       "threads" -> R.drawable.t3_chats
       "pullRequests" -> R.drawable.t3_pull_requests
       else -> R.drawable.t3_settings
     }
-    // Every destination shows a label, which names it for accessibility.
-    Icon(painter = painterResource(drawable), contentDescription = null)
+    // A visible label names the destination, so only an icon-only item needs a description.
+    Icon(painter = painterResource(drawable), contentDescription = contentDescription)
   }
 
   private companion object {
     const val MODAL_EXPANDED_THRESHOLD = 0.3f
-    const val LABEL_SWAP_PROGRESS = 0.5f
+    const val LABEL_SHOW_PROGRESS = 0.5f
     const val LABEL_FADE_SPAN = 0.35f
+
+    // Material's padding for an unlabelled rail item, which makes its indicator a circle.
+    val ICON_ONLY_INDICATOR_PADDING = 16.dp
     const val DISABLED_ALPHA = 0.4f
   }
 }

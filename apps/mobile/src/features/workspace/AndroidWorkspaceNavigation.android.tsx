@@ -22,7 +22,7 @@ import { useAppearancePreferences } from "../settings/appearance/AppearancePrefe
 import { useAndroidWorkspaceRoot } from "./AndroidWorkspaceTabsProvider";
 import { useWorkspaceTabs } from "./WorkspaceTabsContext";
 
-// Material's wide navigation rail is a fixed 96dp; labels scale inside it.
+// Material's collapsed wide navigation rail is a fixed 96dp.
 export const ANDROID_WORKSPACE_RAIL_WIDTH = 96;
 
 interface NativeNavigationProps extends ViewProps {
