@@ -35,7 +35,6 @@ describe("server browser element refs", () => {
     ServerBrowserPage.snapshot({
       page,
       cdp,
-      renderScale: 1,
       consoleEntries: [],
       networkEntries: [],
       actionTimeline: [],
@@ -56,6 +55,36 @@ describe("server browser element refs", () => {
     return locator!;
   };
   const repeatedRows = `<ul>${Array.from({ length: 5 }, (_, i) => `<li>row ${i + 1}<button data-testid="delete-row" onclick="this.parentElement.remove()">delete</button></li>`).join("")}</ul>`;
+
+  it("captures snapshots at the page's device scale and reports the PNG's own size", async () => {
+    // Scaled captures make Chromium re-render at a new scale, which a hidden desktop
+    // webview can't do, so they came back blurry. Snapshots now keep device pixels.
+    // Raw CDP captures follow the device scale only when it's forced, as the server does.
+    const hiDpiBrowser = await chromium.launch({
+      headless: true,
+      args: ["--force-device-scale-factor=2"],
+    });
+    const hiDpi = await hiDpiBrowser.newContext({
+      viewport: { width: 1280, height: 800 },
+      deviceScaleFactor: 2,
+    });
+    try {
+      const hiDpiPage = await hiDpi.newPage();
+      await hiDpiPage.setContent("<p>sharp</p>");
+      const { screenshot } = await ServerBrowserPage.snapshot({
+        page: hiDpiPage,
+        cdp: await hiDpi.newCDPSession(hiDpiPage),
+        consoleEntries: [],
+        networkEntries: [],
+        actionTimeline: [],
+      });
+      const png = Buffer.from(screenshot.data, "base64");
+      expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([2560, 1600]);
+      expect([screenshot.width, screenshot.height]).toEqual([2560, 1600]);
+    } finally {
+      await hiDpiBrowser.close();
+    }
+  });
 
   it("clicks the fifth repeated delete control without touching row one", async () => {
     await page.setContent(repeatedRows);
