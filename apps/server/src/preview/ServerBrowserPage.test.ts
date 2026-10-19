@@ -412,9 +412,10 @@ describe("server browser screenshots", () => {
 
       // A scaled capture makes Chromium re-render at that scale, which a hidden desktop
       // webview can't do, so it returns a blurry upscaled frame.
-      expect(send.mock.calls.filter(([method]) => method === "Page.captureScreenshot")).toEqual([
-        ["Page.captureScreenshot", { format: "png" }],
-      ]);
+      const captures = send.mock.calls.filter(([method]) => method === "Page.captureScreenshot");
+      expect(captures).toHaveLength(1);
+      expect(captures[0]?.[1]).toMatchObject({ format: "png" });
+      expect(captures[0]?.[1]).not.toHaveProperty("clip");
       const png = Buffer.from(screenshot.data, "base64");
       expect(pngDimensions(png)).toEqual({ width: 1280, height: 720 });
       expect({ width: screenshot.width, height: screenshot.height }).toEqual(pngDimensions(png));

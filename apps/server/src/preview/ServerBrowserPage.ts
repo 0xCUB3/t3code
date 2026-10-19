@@ -378,11 +378,16 @@ const maskTree = (tree: string, dotted: RegExp) =>
 // hidden desktop webview can't do, so it returns a blurry upscale of a stale frame.
 export const captureViewport = async (
   cdp: CDPSession,
-  options: { readonly format: "png" | "jpeg"; readonly quality?: number },
+  options: {
+    readonly format: "png" | "jpeg";
+    readonly quality?: number;
+    readonly optimizeForSpeed?: boolean;
+  },
 ) => {
   const { data } = await cdp.send("Page.captureScreenshot", {
     format: options.format,
     ...(options.quality === undefined ? {} : { quality: options.quality }),
+    ...(options.optimizeForSpeed ? { optimizeForSpeed: true } : {}),
   });
   return data;
 };
@@ -411,8 +416,10 @@ const RESIZE_PNG = `async function(data, width, height) {
 const captureSnapshot = async (
   cdp: CDPSession,
 ): Promise<PreviewAutomationSnapshot["screenshot"]> => {
-  const native = await captureViewport(cdp, { format: "png" });
-  const size = pngDimensions(Buffer.from(native, "base64"));
+  // The native PNG is discarded after the resize, so encode it for speed, not size.
+  const native = await captureViewport(cdp, { format: "png", optimizeForSpeed: true });
+  // The IHDR sits in the first 24 bytes; decoding only those avoids a copy of a large frame.
+  const size = pngDimensions(Buffer.from(native.slice(0, 32), "base64"));
   const scale = Math.min(1, MAX_SCREENSHOT_DIMENSION / Math.max(size.width, size.height));
   if (scale === 1) return { mimeType: "image/png", data: native, ...size };
   const width = Math.max(1, Math.round(size.width * scale));
