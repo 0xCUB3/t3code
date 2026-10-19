@@ -387,52 +387,56 @@ export const captureViewport = async (
   return data;
 };
 
-// Resize pixels in the existing tab's isolated world: no extra browser, DOM changes,
-// or rendering-scale override (which would blur hidden desktop webviews).
-const captureSnapshot = async (cdp: CDPSession) => {
-  const data = await captureViewport(cdp, { format: "png" });
-  const { width, height } = pngDimensions(Buffer.from(data, "base64"));
-  const scale = Math.min(1, MAX_SCREENSHOT_DIMENSION / Math.max(width, height));
-  if (scale === 1) return data;
+// A page's own encoder globals are not trusted, and its CSP may forbid blob images, so the
+// resize runs in an isolated world. Chromium hands back the same world for a name while the
+// document lives, so repeated snapshots do not pile up contexts.
+const ENCODER_WORLD = "t3-snapshot-encoder";
+const RESIZE_PNG = `async function(data, width, height) {
+  const source = new Blob([Uint8Array.fromBase64(data)], { type: "image/png" });
+  const image = await createImageBitmap(source);
+  try {
+    const canvas = new OffscreenCanvas(width, height);
+    const context = canvas.getContext("2d");
+    context.imageSmoothingQuality = "high";
+    context.drawImage(image, 0, 0, width, height);
+    const png = await canvas.convertToBlob({ type: "image/png" });
+    return new Uint8Array(await png.arrayBuffer()).toBase64();
+  } finally {
+    image.close();
+  }
+}`;
+
+// Captured at device pixels and shrunk afterwards: a forced DPR of 2 on a 4K viewport would
+// otherwise return a PNG past 100 MB.
+const captureSnapshot = async (
+  cdp: CDPSession,
+): Promise<PreviewAutomationSnapshot["screenshot"]> => {
+  const native = await captureViewport(cdp, { format: "png" });
+  const size = pngDimensions(Buffer.from(native, "base64"));
+  const scale = Math.min(1, MAX_SCREENSHOT_DIMENSION / Math.max(size.width, size.height));
+  if (scale === 1) return { mimeType: "image/png", data: native, ...size };
+  const width = Math.max(1, Math.round(size.width * scale));
+  const height = Math.max(1, Math.round(size.height * scale));
   const { frameTree } = await cdp.send("Page.getFrameTree");
   const { executionContextId } = await cdp.send("Page.createIsolatedWorld", {
     frameId: frameTree.frame.id,
-    worldName: "t3-snapshot-encoder",
+    worldName: ENCODER_WORLD,
   });
   const { result, exceptionDetails } = await cdp.send("Runtime.callFunctionOn", {
     executionContextId,
-    functionDeclaration: `async function(data, width, height) {
-      const bytes = Uint8Array.from(atob(data), c => c.charCodeAt(0));
-      const image = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
-      try {
-        const canvas = new OffscreenCanvas(width, height);
-        const context = canvas.getContext("2d");
-        context.imageSmoothingQuality = "high";
-        context.drawImage(image, 0, 0, width, height);
-        const blob = await canvas.convertToBlob({ type: "image/png" });
-        return await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result.split(",")[1]);
-          reader.onerror = () => reject(reader.error);
-          reader.readAsDataURL(blob);
-        });
-      } finally {
-        image.close();
-      }
-    }`,
-    arguments: [
-      { value: data },
-      { value: Math.max(1, Math.round(width * scale)) },
-      { value: Math.max(1, Math.round(height * scale)) },
-    ],
+    functionDeclaration: RESIZE_PNG,
+    arguments: [{ value: native }, { value: width }, { value: height }],
     awaitPromise: true,
     returnByValue: true,
   });
   if (exceptionDetails || typeof result.value !== "string") {
-    throw new Error("Snapshot PNG resize failed.");
+    throw new Error(
+      `Snapshot resize failed: ${exceptionDetails?.exception?.description ?? exceptionDetails?.text ?? "no image"}`,
+    );
   }
-  return result.value as string;
+  return { mimeType: "image/png", data: result.value, width, height };
 };
+
 type SnapshotInput = {
   readonly page: Page;
   readonly cdp: CDPSession;
@@ -484,7 +488,7 @@ const capture = async (
     void iframe.dispose().catch(constVoid);
     if (frame && unread.includes(frame)) throw tooBusy();
   }
-  const [page, data] = await pageAndScreenshot;
+  const [page, screenshot] = await pageAndScreenshot;
   if (state.generation !== generation) throw pageChanged();
   const mask = (text: string) => (dotted ? text.replace(dotted, MASKED_VALUE) : text);
   const accessibilityTree = (dotted ? maskTree(tree, dotted) : tree)
@@ -503,8 +507,7 @@ const capture = async (
     consoleEntries: [...input.consoleEntries],
     networkEntries: [...input.networkEntries],
     actionTimeline: [...input.actionTimeline],
-    // Read from the PNG, so the size matches whatever scale the page renders at.
-    screenshot: { mimeType: "image/png", data, ...pngDimensions(Buffer.from(data, "base64")) },
+    screenshot,
   };
 };
 

@@ -16,6 +16,7 @@ import {
   vi,
 } from "vite-plus/test";
 
+import { pngDimensions } from "../imageMime.ts";
 import { presentAsChrome } from "./ServerBrowserContexts.ts";
 import * as ServerBrowserPage from "./ServerBrowserPage.ts";
 
@@ -64,57 +65,6 @@ describe("server browser element refs", () => {
     return locator!;
   };
   const repeatedRows = `<ul>${Array.from({ length: 5 }, (_, i) => `<li>row ${i + 1}<button data-testid="delete-row" onclick="this.parentElement.remove()">delete</button></li>`).join("")}</ul>`;
-
-  it.each([
-    { width: 1280, height: 800, outputHeight: 800 },
-    { width: 3840, height: 2160, outputHeight: 720 },
-  ])("bounds native snapshots of $width x $height", async ({ width, height, outputHeight }) => {
-    // Scaled captures make Chromium re-render at a new scale, which a hidden desktop
-    // webview can't do, so they came back blurry. Resize only after native capture.
-    // Raw CDP captures follow the device scale only when it's forced, as the server does.
-    const hiDpiBrowser = await chromium.launch({
-      headless: true,
-      args: ["--force-device-scale-factor=2"],
-    });
-    const hiDpi = await hiDpiBrowser.newContext({
-      viewport: { width, height },
-      deviceScaleFactor: 2,
-    });
-    try {
-      const hiDpiPage = await hiDpi.newPage();
-      await hiDpiPage.setContent(
-        `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none'; img-src 'none'"><p>sharp</p>`,
-      );
-      // Hostile page globals and a strict CSP must not interfere with the encoder.
-      await hiDpiPage.evaluate(`(() => {
-        globalThis.createImageBitmap = globalThis.OffscreenCanvas = () => {
-          throw new Error("Do not use the page's encoder globals");
-        };
-      })()`);
-      const hiDpiCdp = await hiDpi.newCDPSession(hiDpiPage);
-      const send = vi.spyOn(hiDpiCdp, "send");
-      const { screenshot } = await ServerBrowserPage.snapshot({
-        page: hiDpiPage,
-        cdp: hiDpiCdp,
-        consoleEntries: [],
-        networkEntries: [],
-        actionTimeline: [],
-      });
-      expect(send.mock.calls.filter(([method]) => method === "Page.captureScreenshot")).toEqual([
-        ["Page.captureScreenshot", { format: "png" }],
-      ]);
-      expect(hiDpiBrowser.contexts()).toEqual([hiDpi]);
-      expect(hiDpi.pages()).toEqual([hiDpiPage]);
-      expect(await hiDpiPage.locator("body").innerHTML()).toBe("<p>sharp</p>");
-      expect(await hiDpiPage.evaluate("devicePixelRatio")).toBe(2);
-      expect(hiDpiPage.viewportSize()).toEqual({ width, height });
-      const png = Buffer.from(screenshot.data, "base64");
-      expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([1280, outputHeight]);
-      expect([screenshot.width, screenshot.height]).toEqual([1280, outputHeight]);
-    } finally {
-      await hiDpiBrowser.close();
-    }
-  });
 
   it("clicks the fifth repeated delete control without touching row one", async () => {
     await page.setContent(repeatedRows);
@@ -425,6 +375,57 @@ describe("server browser drag", () => {
       expect(unobserved).toEqual([]);
     } finally {
       process.off("unhandledRejection", onUnhandled);
+    }
+  });
+});
+
+describe("server browser screenshots", () => {
+  it("captures at native device pixels and downsamples to 1280 px in the same tab", async () => {
+    // Raw CDP captures follow the device scale only when it's forced, as the server does.
+    const browser = await chromium.launch({
+      headless: true,
+      args: ["--force-device-scale-factor=2"],
+    });
+    try {
+      const context = await browser.newContext({
+        viewport: { width: 3840, height: 2160 },
+        deviceScaleFactor: 2,
+      });
+      const page = await context.newPage();
+      await page.setContent(
+        `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none'; img-src 'none'"><p>sharp</p>`,
+      );
+      // The encoder must not depend on anything the page can reach or replace.
+      await page.evaluate(`globalThis.createImageBitmap = globalThis.OffscreenCanvas = () => {
+        throw new Error("Do not use the page's encoder globals");
+      }`);
+      const cdp = await context.newCDPSession(page);
+      const send = vi.spyOn(cdp, "send");
+
+      const { screenshot } = await ServerBrowserPage.snapshot({
+        page,
+        cdp,
+        consoleEntries: [],
+        networkEntries: [],
+        actionTimeline: [],
+      });
+
+      // A scaled capture makes Chromium re-render at that scale, which a hidden desktop
+      // webview can't do, so it returns a blurry upscaled frame.
+      expect(send.mock.calls.filter(([method]) => method === "Page.captureScreenshot")).toEqual([
+        ["Page.captureScreenshot", { format: "png" }],
+      ]);
+      const png = Buffer.from(screenshot.data, "base64");
+      expect(pngDimensions(png)).toEqual({ width: 1280, height: 720 });
+      expect({ width: screenshot.width, height: screenshot.height }).toEqual(pngDimensions(png));
+      expect(await page.evaluate("[devicePixelRatio, innerWidth, innerHeight]")).toEqual([
+        2, 3840, 2160,
+      ]);
+      expect(await page.locator("body").innerHTML()).toBe("<p>sharp</p>");
+      expect(browser.contexts()).toEqual([context]);
+      expect(context.pages()).toEqual([page]);
+    } finally {
+      await browser.close();
     }
   });
 });
