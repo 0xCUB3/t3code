@@ -2770,6 +2770,7 @@ describe("PiAdapterV2", () => {
         notice.type === "turn_item.updated" &&
           notice.turnItem.type === "system_notice" &&
           notice.turnItem.status === "completed" &&
+          notice.turnItem.level === "info" &&
           notice.turnItem.message === "Command finished\nwith details",
       );
       const terminal = yield* takeEvent((event) => event.type === "turn.terminal");
