@@ -497,7 +497,7 @@ describe("deriveMessagesTimelineRows", () => {
       expect(notice.entry.sourceActivityKind).toBe(
         level === "info" ? undefined : "runtime.warning",
       );
-      expect(workEntryIconName(notice.entry)).toBe(level === "info" ? "zap" : "warning");
+      expect(workEntryIconName(notice.entry)).toBe(level === "info" ? "zap" : "circle-alert");
       expect(workEntryDisplayLabel(notice.entry, undefined)).toBe(message);
     },
   );

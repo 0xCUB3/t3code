@@ -168,7 +168,7 @@ export function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconNa
     return workEntry.structuredPayload?.type === "system_notice" &&
       workEntry.structuredPayload.level === "info"
       ? "zap"
-      : "warning";
+      : "circle-alert";
   }
   if (workEntry.itemType === "user_input_request" || workEntry.itemType === "approval_request") {
     return "message-circle";
