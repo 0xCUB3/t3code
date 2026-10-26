@@ -459,43 +459,48 @@ describe("deriveMessagesTimelineRows", () => {
     },
   );
 
-  it("renders info notices without warning styling", () => {
-    const fixture = makeStreamingTimelineFixture();
-    const message = "TPS 227.1 tok/s · TTFT 3.4s";
-    const id = TurnItemId.make("info-notice");
-    const [notice] = deriveTimelineEntriesFromVisibleTurnItems({
-      visibleTurnItems: [
-        {
-          ...fixture.visibleTurnItems[0]!,
-          sourceItemId: id,
-          item: {
-            id,
-            threadId: fixture.threadId,
-            runId: fixture.runId,
-            nodeId: null,
-            providerThreadId: null,
-            providerTurnId: null,
-            nativeItemRef: null,
-            parentItemId: null,
-            ordinal: 1,
-            startedAt: DateTime.makeUnsafe(fixture.time(1)),
-            completedAt: DateTime.makeUnsafe(fixture.time(1)),
-            updatedAt: DateTime.makeUnsafe(fixture.time(1)),
-            type: "system_notice",
-            message,
-            level: "info",
-            title: message,
-            status: "completed",
+  it.each(["info", "warning", "error", undefined] as const)(
+    "renders %s notices with compatible severity",
+    (level) => {
+      const fixture = makeStreamingTimelineFixture();
+      const message = "TPS 227.1 tok/s · TTFT 3.4s";
+      const id = TurnItemId.make("info-notice");
+      const [notice] = deriveTimelineEntriesFromVisibleTurnItems({
+        visibleTurnItems: [
+          {
+            ...fixture.visibleTurnItems[0]!,
+            sourceItemId: id,
+            item: {
+              id,
+              threadId: fixture.threadId,
+              runId: fixture.runId,
+              nodeId: null,
+              providerThreadId: null,
+              providerTurnId: null,
+              nativeItemRef: null,
+              parentItemId: null,
+              ordinal: 1,
+              startedAt: DateTime.makeUnsafe(fixture.time(1)),
+              completedAt: DateTime.makeUnsafe(fixture.time(1)),
+              updatedAt: DateTime.makeUnsafe(fixture.time(1)),
+              type: "system_notice",
+              message,
+              ...(level === undefined ? {} : { level }),
+              title: message,
+              status: "completed",
+            },
           },
-        },
-      ],
-      optimisticMessages: [],
-    });
-    if (notice?.kind !== "work") throw new Error("Expected a notice work entry");
-    expect(notice.entry.sourceActivityKind).toBeUndefined();
-    expect(workEntryIconName(notice.entry)).toBe("zap");
-    expect(workEntryDisplayLabel(notice.entry, undefined)).toBe(message);
-  });
+        ],
+        optimisticMessages: [],
+      });
+      if (notice?.kind !== "work") throw new Error("Expected a notice work entry");
+      expect(notice.entry.sourceActivityKind).toBe(
+        level === "info" ? undefined : "runtime.warning",
+      );
+      expect(workEntryIconName(notice.entry)).toBe(level === "info" ? "zap" : "warning");
+      expect(workEntryDisplayLabel(notice.entry, undefined)).toBe(message);
+    },
+  );
 
   it.each([false, true])(
     "gives live compaction the activity slot and restores Thinking (runless: %s)",

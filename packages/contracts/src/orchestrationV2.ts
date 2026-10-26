@@ -1356,8 +1356,7 @@ export type OrchestrationV2UserMessageInputIntent =
   typeof OrchestrationV2UserMessageInputIntent.Type;
 
 /** Notices without a level predate it and are warnings. */
-export const OrchestrationV2SystemNoticeLevel = Schema.Literals(["info", "warning", "error"]);
-export type OrchestrationV2SystemNoticeLevel = typeof OrchestrationV2SystemNoticeLevel.Type;
+const OrchestrationV2SystemNoticeLevel = Schema.Literals(["info", "warning", "error"]);
 
 const OrchestrationV2TurnItemBaseFields = {
   toolNonExecutionKind: Schema.optional(Schema.String),
